@@ -146,7 +146,14 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
     memory->SetupMemoryRegions(fmem_size, use_extended_mem1, use_extended_mem2);
 
-    main_thread.Run([this, module, &args, has_libcinternal](std::stop_token) {
+    u64 main_stack_size = Libraries::Kernel::ThrStackInitial;
+    if (proc_param->size >= offsetof(OrbisProcParam, main_thread_stack_size) + sizeof(u32*) &&
+        proc_param->main_thread_stack_size) {
+        main_stack_size = *proc_param->main_thread_stack_size;
+    }
+    LOG_INFO(Core_Linker, "Main thread stack size: {:#x}", main_stack_size);
+
+    const auto main_func = [this, module, &args, has_libcinternal](std::stop_token) {
         Common::SetCurrentThreadName("Game:Main");
 
 #ifndef _WIN32 // Clear any existing signal mask for game threads.
@@ -214,7 +221,8 @@ void Linker::Execute(const std::vector<std::string>& args) {
         // Run the game's entry function
         params.entry_addr = module->GetEntryAddress();
         RunMainEntry(&params);
-    });
+    };
+    main_thread.Run(main_func, main_stack_size);
 }
 
 s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
