@@ -69,10 +69,13 @@ public:
         Stop();
     }
 
-    void Run(std::function<void(std::stop_token)>&& func) {
+    void Run(std::function<void(std::stop_token)>&& func, size_t stack_size = 0) {
         this->func = std::move(func);
         PthreadAttrT attr{};
         posix_pthread_attr_init(&attr);
+        if (stack_size != 0) {
+            attr->stacksize_attr = stack_size;
+        }
         posix_pthread_create(&thread, &attr, HOST_CALL(RunWrapper), this);
         posix_pthread_attr_destroy(&attr);
     }
