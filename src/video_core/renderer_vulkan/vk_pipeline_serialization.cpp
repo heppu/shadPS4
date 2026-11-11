@@ -12,8 +12,8 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 13u;
-static constexpr u32 ShaderMetaVersion = 7u;
+static constexpr u32 ShaderBinaryVersion = 15u;
+static constexpr u32 ShaderMetaVersion = 8u;
 static constexpr u32 PipelineKeyVersion = 4u;
 } // namespace Serialization
 
@@ -271,28 +271,28 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     if (new_program) {
         module = CompileSPV(spv, instance.GetDevice());
         it_pgm.value() = std::move(program);
-    } else {
-        const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
-        if (it != it_pgm.value()->modules.end()) {
-            // A matching permutation is valid only at its original index. A different index means
-            // the store holds entries from more than one cache generation, so this pipeline is
-            // left to compile at runtime.
-            const auto idx = std::distance(it_pgm.value()->modules.begin(), it);
-            if (perm_idx != idx) {
-                LOG_WARNING(Render_Vulkan,
-                            "Cached permutation {} of {}_{:x} conflicts with index {}, skipping "
-                            "preload",
-                            perm_idx, program->info.hw_stage, program->info.pgm_hash, idx);
-                return false;
-            }
-            module = it->module;
-        } else {
-            module = CompileSPV(spv, instance.GetDevice());
+    } else if (auto& cached = it_pgm.value()->modules;
+               perm_idx < cached.size() && cached[perm_idx].module) {
+        // An occupied slot holding another permutation means the store has entries from more than
+        // one cache generation, so this pipeline is left to compile at runtime.
+        if (cached[perm_idx].spec != spec) {
+            LOG_WARNING(Render_Vulkan,
+                        "Cached permutation {} of {}_{:x} is stale, skipping preload", perm_idx,
+                        program->info.hw_stage, program->info.pgm_hash);
+            return false;
         }
+        module = cached[perm_idx].module;
+    } else {
+        module = CompileSPV(spv, instance.GetDevice());
+        auto perm_info = std::make_unique<Shader::Info>(std::move(program->info));
+        spec.info = perm_info.get();
+        it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx, std::move(perm_info));
     }
-    it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+    if (new_program) {
+        it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+    }
 
-    infos[stage] = &it_pgm.value()->info;
+    infos[stage] = &it_pgm.value()->PermutInfo(perm_idx);
     modules[stage] = module;
     if (auto& fetch = it_pgm.value()->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
         fetch_shader = &fetch;
