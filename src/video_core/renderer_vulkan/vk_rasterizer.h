@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -126,6 +127,14 @@ private:
                              const Shader::Info& stage);
     vk::DescriptorSet GetSamplerTableSet(const Shader::SamplerResource& sampler,
                                          const Shader::Info& stage);
+    u64 TableImageKey(const AmdGpu::Image& tsharp) const;
+    vk::ImageView ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
+                                    const Shader::ImageResource* image_desc, bool& is_pending);
+    u32 AcquireImageTableSet(u32 num_entries);
+    void BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc);
+    vk::DescriptorSet GetImageTableSet(const Shader::ImageResource& image_desc,
+                                       const Shader::Info& stage);
+    void ValidateImageTableSets();
     bool BindResources(const Pipeline* pipeline);
 
     void BindVertexBuffers(const GraphicsPipeline* pipeline);
@@ -190,6 +199,50 @@ private:
     boost::container::small_vector<vk::DescriptorSet, 4> table_sets;
     u64 sampler_table_generation{};
     u64 sampler_table_binds{};
+
+    /// A texture resolved from an image table entry, shared by every index that names it.
+    struct TableImage {
+        VideoCore::ImageId image_id{};
+        u64 image_uid{};
+        vk::ImageView view{};
+        u64 used_tick{};
+        u64 synced_tick{};
+    };
+    /// One immutable version of a table's descriptors.
+    struct ImageTableSet {
+        vk::DescriptorSet set;
+        u32 num_entries{};
+        u64 bound_tick{};
+        u64 generation{};
+        bool is_current{};
+        std::vector<u64> keys;
+        std::vector<vk::ImageView> views;
+    };
+    struct ImageTable {
+        VAddr address{};
+        u32 bytes{};
+        u32 stride_dw{};
+        u32 offset_dw{};
+        u32 num_entries{};
+        std::vector<u8> shadow;
+        u64 checked_tick{};
+        s32 current_set{-1};
+        bool has_unresolved{};
+    };
+    struct BoundImageTable {
+        u32 table;
+        u32 slot;
+    };
+    std::unordered_map<u64, TableImage> table_images;
+    std::vector<ImageTableSet> image_table_sets;
+    std::vector<ImageTable> image_tables;
+    boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
+    std::vector<u64> image_table_keys;
+    std::vector<vk::ImageView> image_table_views;
+    std::vector<vk::DescriptorImageInfo> image_table_infos;
+    u64 table_resolve_tick{};
+    u64 table_evict_tick{};
+    u32 table_resolves{};
     boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
 
     struct BoundBuffer {
