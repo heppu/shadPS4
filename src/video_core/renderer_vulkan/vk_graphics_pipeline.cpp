@@ -481,6 +481,7 @@ template void GraphicsPipeline::GetVertexInputs(
 void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
     u32 binding{};
+    u32 num_array_descriptors{};
 
     for (const auto* stage : stages) {
         if (!stage) {
@@ -510,15 +511,17 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             binding += num_bindings;
         }
         for (const auto& sampler : stage->samplers) {
+            const u32 num_descriptors = sampler.NumDescriptors();
             bindings.push_back({
                 .binding = binding++,
                 .descriptorType = vk::DescriptorType::eSampler,
-                .descriptorCount = 1,
+                .descriptorCount = num_descriptors,
                 .stageFlags = stage_bit,
             });
+            num_array_descriptors += num_descriptors - 1;
         }
     }
-    uses_push_descriptors = binding < instance.MaxPushDescriptors();
+    uses_push_descriptors = binding + num_array_descriptors < instance.MaxPushDescriptors();
     const auto flags = uses_push_descriptors
                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
                            : vk::DescriptorSetLayoutCreateFlagBits{};

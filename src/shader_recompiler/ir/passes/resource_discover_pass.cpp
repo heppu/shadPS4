@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <limits>
 #include "common/assert.h"
 #include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
@@ -331,7 +333,154 @@ void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList
     MarkReadConstBufferSharpSources(vsharp);
 }
 
-void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
+struct TableOffset {
+    IR::Value index{};
+    u64 scale{1};
+    u64 offset{};
+};
+
+static TableOffset DescribeTableOffset(const IR::Value& value) {
+    constexpr u64 max_value = std::numeric_limits<u32>::max();
+    if (value.IsImmediate()) {
+        return {.scale = 0, .offset = value.U32()};
+    }
+    const IR::Inst* inst = value.Inst();
+    const IR::Opcode opcode = inst->GetOpcode();
+    if ((opcode == IR::Opcode::IAdd32 || opcode == IR::Opcode::IMul32) &&
+        inst->Arg(0).IsImmediate() != inst->Arg(1).IsImmediate()) {
+        const bool is_first_immediate = inst->Arg(0).IsImmediate();
+        TableOffset result = DescribeTableOffset(inst->Arg(is_first_immediate ? 1 : 0));
+        const u64 immediate = inst->Arg(is_first_immediate ? 0 : 1).U32();
+        if (opcode == IR::Opcode::IAdd32) {
+            result.offset += immediate;
+        } else {
+            result.scale *= immediate;
+            result.offset *= immediate;
+        }
+        if (result.scale <= max_value && result.offset <= max_value) {
+            return result;
+        }
+    } else if ((opcode == IR::Opcode::ShiftLeftLogical32 ||
+                opcode == IR::Opcode::ShiftRightLogical32) &&
+               inst->Arg(1).IsImmediate() && inst->Arg(1).U32() < 32) {
+        const u32 shift = inst->Arg(1).U32();
+        TableOffset result = DescribeTableOffset(inst->Arg(0));
+        if (opcode == IR::Opcode::ShiftLeftLogical32) {
+            result.scale <<= shift;
+            result.offset <<= shift;
+            if (result.scale <= max_value && result.offset <= max_value) {
+                return result;
+            }
+        } else if (((result.scale | result.offset) & ((u64{1} << shift) - 1)) == 0) {
+            result.scale >>= shift;
+            result.offset >>= shift;
+            return result;
+        }
+    }
+    return {.index = value};
+}
+
+static bool HasRuntimeSource(const IR::Value& value) {
+    boost::container::small_vector<const IR::Inst*, 16> visited;
+    boost::container::small_vector<const IR::Inst*, 16> worklist;
+    const auto visit = [&](const IR::Value& arg) {
+        if (arg.IsImmediate()) {
+            return;
+        }
+        const IR::Inst* inst = arg.Inst();
+        if (std::ranges::find(visited, inst) == visited.end()) {
+            visited.push_back(inst);
+            worklist.push_back(inst);
+        }
+    };
+    visit(value);
+    while (!worklist.empty()) {
+        const IR::Inst* inst = worklist.back();
+        worklist.pop_back();
+        switch (inst->GetOpcode()) {
+        case IR::Opcode::GetUserData:
+            break;
+        case IR::Opcode::ReadConst:
+        case IR::Opcode::ReadConstBuffer:
+        case IR::Opcode::CompositeConstructU32x2:
+        case IR::Opcode::CompositeConstructU32x4:
+        case IR::Opcode::IAdd32:
+        case IR::Opcode::ISub32:
+        case IR::Opcode::IMul32:
+        case IR::Opcode::ShiftLeftLogical32:
+        case IR::Opcode::ShiftRightLogical32:
+        case IR::Opcode::BitwiseAnd32:
+        case IR::Opcode::BitwiseOr32:
+        case IR::Opcode::BitwiseXor32:
+        case IR::Opcode::BitwiseNot32:
+        case IR::Opcode::UMin32:
+        case IR::Opcode::UMax32:
+        case IR::Opcode::BitFieldUExtract:
+            for (size_t i = 0; i < inst->NumArgs(); ++i) {
+                visit(inst->Arg(i));
+            }
+            break;
+        default:
+            return true;
+        }
+    }
+    return false;
+}
+
+static void DiscoverSharpTable(const SharpReference& sharp, SharpTableReference& table) {
+    const IR::Inst* first = sharp.dwords[0].TryInst();
+    if (!first || first->GetOpcode() != IR::Opcode::ReadConstBuffer) {
+        return;
+    }
+    const IR::Inst* handle = first->Arg(0).TryInst();
+    if (!handle || handle->GetOpcode() != IR::Opcode::CompositeConstructU32x4) {
+        return;
+    }
+    const TableOffset base = DescribeTableOffset(first->Arg(1));
+    if (base.index.IsEmpty() || base.scale < sharp.num_dwords || !HasRuntimeSource(base.index)) {
+        return;
+    }
+    for (u32 dw = 1; dw < sharp.num_dwords; ++dw) {
+        const IR::Inst* read = sharp.dwords[dw].TryInst();
+        if (!read || read->GetOpcode() != IR::Opcode::ReadConstBuffer) {
+            return;
+        }
+        const IR::Inst* read_handle = read->Arg(0).TryInst();
+        if (!read_handle || read_handle->GetOpcode() != IR::Opcode::CompositeConstructU32x4) {
+            return;
+        }
+        for (size_t i = 0; i < handle->NumArgs(); ++i) {
+            if (read_handle->Arg(i) != handle->Arg(i)) {
+                return;
+            }
+        }
+        const TableOffset offset = DescribeTableOffset(read->Arg(1));
+        if (offset.index != base.index || offset.scale != base.scale ||
+            offset.offset != base.offset + dw) {
+            return;
+        }
+    }
+
+    SharpReference vsharp{};
+    vsharp.num_dwords = static_cast<u32>(handle->NumArgs());
+    for (size_t i = 0; i < handle->NumArgs(); ++i) {
+        vsharp.dwords[i] = handle->Arg(i);
+        if (const IR::Inst* source = vsharp.dwords[i].TryInst();
+            source && source->GetOpcode() == IR::Opcode::ReadFirstLane) {
+            vsharp.dwords[i] = source->Arg(0);
+        }
+        if (const IR::Inst* source = vsharp.dwords[i].TryInst(); source && !IsSharpSource(source)) {
+            return;
+        }
+    }
+    table.sharp = vsharp;
+    table.index = base.index;
+    table.stride_dw = static_cast<u32>(base.scale);
+    table.offset_dw = static_cast<u32>(base.offset);
+}
+
+void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources,
+                        const Profile& profile) {
     IR::Inst* image_handle = inst.Arg(0).Inst();
     ASSERT(image_handle->GetOpcode() == IR::Opcode::ImageHandle);
     auto& resource = resources.emplace_back(&inst);
@@ -386,7 +535,12 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
         ssharp.dwords[0] = ssharp_dw0;
     }
 
-    MarkReadConstBufferSharpSources(ssharp);
+    auto& sampler_table = resource.tables[1];
+    if (profile.supports_sampled_image_array_non_uniform_indexing &&
+        ssharp.post_op != SharpFetchPostOp::DisableAnisoIfSingleLod) {
+        DiscoverSharpTable(ssharp, sampler_table);
+    }
+    MarkReadConstBufferSharpSources(sampler_table.index.IsEmpty() ? ssharp : sampler_table.sharp);
 }
 
 ResourceDiscoveryList ResourceDiscoverPass(IR::Program& program, const Profile& profile) {
@@ -397,7 +551,7 @@ ResourceDiscoveryList ResourceDiscoverPass(IR::Program& program, const Profile& 
             if (IsBufferInstruction(inst)) {
                 DiscoverBufferSharp(*block, inst, sharp_usages);
             } else if (IsImageInstruction(inst)) {
-                DiscoverImageSharp(*block, inst, sharp_usages);
+                DiscoverImageSharp(*block, inst, sharp_usages, profile);
             } else if (IsDataRingInstruction(inst)) {
                 sharp_usages.emplace_back(&inst);
             }
