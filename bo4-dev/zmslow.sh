@@ -1,7 +1,7 @@
 #!/bin/sh
 # usage: zmslow.sh [run-seconds]   Zombies start sequence with stretched timings for slow debug runs
 cd /mnt/games/PS4/bo4-dev
-k() { ./key -P $1 -s 300 -p $1; }
+k() { ./key -P $1 -s 60 -p $1; }
 (sleep 240; ./shot v0; k n; sleep 120; ./shot v1
  k Right; sleep 10; k Right; sleep 10; ./shot v2
  k n; sleep 120; ./shot v3
