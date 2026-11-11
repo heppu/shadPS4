@@ -105,6 +105,10 @@ public:
     static std::string GetShaderName(Shader::HwStage stage, u64 hash,
                                      std::optional<size_t> perm = {});
 
+    DescriptorHeap& GetDescriptorHeap() {
+        return desc_heap;
+    }
+
     auto& GetProfile() const {
         return profile;
     }
