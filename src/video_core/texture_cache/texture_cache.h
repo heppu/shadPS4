@@ -191,6 +191,19 @@ public:
         return image;
     }
 
+    /// Returns the image if `id` still names the registered image created with `uid`.
+    [[nodiscard]] Image* TryGetImage(ImageId id, u64 uid) {
+        std::scoped_lock lk{registry_mutex};
+        if (!slot_images.IsAllocated(id)) {
+            return nullptr;
+        }
+        Image& image = slot_images[id];
+        if (image.image_uid != uid || False(image.flags & ImageFlagBits::Registered)) {
+            return nullptr;
+        }
+        return &image;
+    }
+
     /// Retrieves the image view with the specified id.
     [[nodiscard]] ImageView& GetImageView(ImageId id) {
         return slot_image_views[id];

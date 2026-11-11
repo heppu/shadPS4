@@ -505,7 +505,14 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
         tsharp.dwords[4] = tsharp_dw4;
     }
 
-    MarkReadConstBufferSharpSources(tsharp);
+    auto& image_table = resource.tables[0];
+    const auto inst_info = inst.Flags<IR::TextureInstInfo>();
+    if (profile.max_image_table_size != 0 && inst.GetOpcode() == IR::Opcode::ImageSampleRaw &&
+        tsharp.post_op == SharpFetchPostOp::None && !inst_info.is_depth && !inst_info.is_array &&
+        !inst_info.is_r128) {
+        DiscoverSharpTable(tsharp, image_table);
+    }
+    MarkReadConstBufferSharpSources(image_table.index.IsEmpty() ? tsharp : image_table.sharp);
 
     if (inst.GetOpcode() != IR::Opcode::ImageSampleRaw) {
         return;

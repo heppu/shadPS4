@@ -289,6 +289,7 @@ public:
         bool is_integer = false;
         bool is_storage = false;
         MipStorageFallbackMode mip_fallback_mode{};
+        u32 table_size = 0;
     };
 
     enum class PointerType : u32 {

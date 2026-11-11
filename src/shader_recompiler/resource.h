@@ -17,6 +17,7 @@ static constexpr u32 NUM_IMAGES = 64;
 static constexpr u32 NUM_BUFFERS = 56;
 static constexpr u32 NUM_SAMPLERS = 16;
 static constexpr u32 MAX_SAMPLER_TABLE_SIZE = 256;
+static constexpr u32 MAX_IMAGE_TABLE_SIZE = 65536;
 static constexpr u32 NUM_FMASKS = 8;
 
 using SharpLocation = u16;
@@ -121,6 +122,17 @@ struct BufferResource {
 };
 using BufferResourceList = boost::container::static_vector<BufferResource, NUM_BUFFERS>;
 
+/// Number of whole sharps of `entry_dwords` in a table laid out as index * stride_dw + offset_dw.
+inline u32 NumSharpTableEntries(const AmdGpu::Buffer& table, u32 stride_dw, u32 offset_dw,
+                                u32 entry_dwords, u32 max_entries) noexcept {
+    const u64 table_dwords = table.GetSize() / sizeof(u32);
+    if (stride_dw == 0 || table_dwords < offset_dw + entry_dwords) {
+        return 0;
+    }
+    const u64 last_entry = (table_dwords - offset_dw - entry_dwords) / stride_dw;
+    return static_cast<u32>(std::min<u64>(last_entry + 1, max_entries));
+}
+
 enum class MipStorageFallbackMode : u16 {
     None,
     DynamicIndex,
@@ -129,6 +141,10 @@ enum class MipStorageFallbackMode : u16 {
 
 struct ImageResource {
     SharpFetch<AmdGpu::Image> sharp_fetch{};
+    SharpFetch<AmdGpu::Buffer> table_fetch{};
+    u32 table_stride_dw{};
+    u32 table_offset_dw{};
+    u32 table_size{};
     bool is_depth{};
     bool is_atomic{};
     bool is_array{};
@@ -138,9 +154,36 @@ struct ImageResource {
     MipStorageFallbackMode mip_fallback_mode{};
     SharpFetchPostOp post_op{};
 
+    bool IsTable() const noexcept {
+        return table_size != 0;
+    }
+
+    constexpr AmdGpu::Buffer GetTableSharp(const auto& info) const noexcept {
+        AmdGpu::Buffer table;
+        if (!table_fetch.Fetch(info.flattened_ud_buf.data(), &table)) {
+            return AmdGpu::Buffer::Null();
+        }
+        return table;
+    }
+
+    u32 NumTableEntries(const auto& info) const noexcept {
+        return NumSharpTableEntries(GetTableSharp(info), table_stride_dw, table_offset_dw,
+                                    sizeof(AmdGpu::Image) / sizeof(u32), MAX_IMAGE_TABLE_SIZE);
+    }
+
+    AmdGpu::Image GetTableEntry(const AmdGpu::Buffer& table, u32 index) const noexcept {
+        AmdGpu::Image image{};
+        const u64 offset = (u64{index} * table_stride_dw + table_offset_dw) * sizeof(u32);
+        if (offset + sizeof(image) <= table.GetSize()) {
+            std::memcpy(&image, reinterpret_cast<const void*>(table.base_address + offset),
+                        sizeof(image));
+        }
+        return image;
+    }
+
     constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
         AmdGpu::Image image{};
-        if (!Fetch(info.flattened_ud_buf.data(), &image)) {
+        if (IsTable() || !Fetch(info.flattened_ud_buf.data(), &image)) {
             return AmdGpu::Image::Null(is_depth);
         }
         if (post_op == SharpFetchPostOp::ConvertCubeTo2DArray) {
@@ -206,16 +249,8 @@ struct SamplerResource {
     }
 
     u32 NumTableEntries(const auto& info) const noexcept {
-        if (table_stride_dw == 0) {
-            return 0;
-        }
-        constexpr u64 entry_dwords = sizeof(AmdGpu::Sampler) / sizeof(u32);
-        const u64 table_dwords = GetTableSharp(info).GetSize() / sizeof(u32);
-        if (table_dwords < table_offset_dw + entry_dwords) {
-            return 0;
-        }
-        const u64 last_entry = (table_dwords - table_offset_dw - entry_dwords) / table_stride_dw;
-        return static_cast<u32>(std::min<u64>(last_entry + 1, MAX_SAMPLER_TABLE_SIZE));
+        return NumSharpTableEntries(GetTableSharp(info), table_stride_dw, table_offset_dw,
+                                    sizeof(AmdGpu::Sampler) / sizeof(u32), MAX_SAMPLER_TABLE_SIZE);
     }
 
     AmdGpu::Sampler GetTableEntry(const AmdGpu::Buffer& table, u32 index,

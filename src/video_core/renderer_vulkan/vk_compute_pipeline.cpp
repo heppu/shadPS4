@@ -47,6 +47,9 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         });
     }
     for (const auto& image : info->images) {
+        if (image.IsTable()) {
+            continue;
+        }
         const u32 num_bindings = image.NumBindings(*info);
         bindings.push_back({
             .binding = binding,

@@ -29,6 +29,12 @@ void Pipeline::CreatePipelineLayout(const vk::PushConstantRange& push_constants)
         if (!stage) {
             continue;
         }
+        for (const auto& image : stage->images) {
+            if (image.IsTable()) {
+                set_layouts.push_back(
+                    desc_heap.TableLayout(vk::DescriptorType::eSampledImage, image.table_size));
+            }
+        }
         for (const auto& sampler : stage->samplers) {
             if (sampler.IsTable()) {
                 set_layouts.push_back(

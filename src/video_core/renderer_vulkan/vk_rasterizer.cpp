@@ -217,6 +217,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         runtime.FlushBarriers();
     }
 
+    ValidateImageTableSets();
     pipeline->BindResources(set_writes, push_data, table_sets);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
@@ -291,6 +292,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         runtime.FlushBarriers();
     }
 
+    ValidateImageTableSets();
     pipeline->BindResources(set_writes, push_data, table_sets);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
@@ -349,6 +351,7 @@ void Rasterizer::DispatchDirect() {
     }
 
     scheduler.EndRendering();
+    ValidateImageTableSets();
     pipeline->BindResources(set_writes, push_data, table_sets);
 
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -384,6 +387,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     }
 
     scheduler.EndRendering();
+    ValidateImageTableSets();
     pipeline->BindResources(set_writes, push_data, table_sets);
 
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -440,6 +444,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     buffer_infos.clear();
     image_infos.clear();
     table_sets.clear();
+    bound_image_tables.clear();
 
     size_t num_image_infos{};
     for (const auto* stage : pipeline->GetStages()) {
@@ -463,6 +468,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             continue;
         }
         const auto num_tables =
+            std::ranges::count_if(stage->images, &Shader::ImageResource::IsTable) +
             std::ranges::count_if(stage->samplers, &Shader::SamplerResource::IsTable);
         set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
                           stage->samplers.size() - num_tables);
@@ -905,6 +911,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
 
     u32 num_images{};
     for (const auto& image_desc : stage.images) {
+        if (image_desc.IsTable()) {
+            table_sets.push_back(GetImageTableSet(image_desc, stage));
+            continue;
+        }
         const auto tsharp = image_desc.GetSharp(stage);
         const auto data_fmt = tsharp.GetDataFmt();
         const auto num_fmt = tsharp.GetNumberFmt();
@@ -1064,6 +1074,289 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         set_write.descriptorType = vk::DescriptorType::eSampler;
         set_write.pImageInfo = &image_infos.back();
     }
+}
+
+u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp) const {
+    if (!tsharp.Valid() || tsharp.Address() == 0) {
+        return 0;
+    }
+    const auto data_fmt = tsharp.GetDataFmt();
+    const auto num_fmt = tsharp.GetNumberFmt();
+    if (!magic_enum::enum_contains(data_fmt) || !magic_enum::enum_contains(num_fmt) ||
+        data_fmt == AmdGpu::DataFormat::FormatInvalid || AmdGpu::IsFmask(data_fmt)) {
+        return 0;
+    }
+    // Table images are declared as one float-sampled 2D type. Formats that may alias a depth
+    // buffer are left out because GPU-written surfaces need per-draw handling.
+    if (tsharp.GetType() != AmdGpu::ImageType::Color2D || AmdGpu::IsInteger(num_fmt) ||
+        tsharp.GetNumberConversion() != AmdGpu::NumberConversion::None ||
+        data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32 ||
+        !memory->IsValidGpuMapping(tsharp.Address(), 0)) {
+        return 0;
+    }
+    return XXH3_64bits(&tsharp, sizeof(tsharp)) | 1;
+}
+
+vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
+                                            const Shader::ImageResource* image_desc,
+                                            bool& is_pending) {
+    static constexpr u32 MaxResolvesPerTick = 48;
+    const auto is_target = [](const VideoCore::Image& image) {
+        return image.usage.render_target || image.usage.depth_target;
+    };
+    const u64 gc_tick = texture_cache.GcTick();
+    if (const auto it = table_images.find(key); it != table_images.end()) {
+        auto& entry = it->second;
+        entry.used_tick = gc_tick;
+        if (!entry.view) {
+            return {};
+        }
+        auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
+        if (image && !is_target(*image)) {
+            if (image_desc && entry.synced_tick != gc_tick) {
+                entry.synced_tick = gc_tick;
+                texture_cache.UpdateImage(entry.image_id);
+                needs_barrier |= runtime.Transit(image, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                                 vk::PipelineStageFlagBits2::eAllCommands,
+                                                 vk::AccessFlagBits2::eShaderRead);
+            }
+            return entry.view;
+        }
+        table_images.erase(it);
+    }
+    if (table_resolve_tick != gc_tick) {
+        table_resolve_tick = gc_tick;
+        table_resolves = 0;
+    }
+    if (!image_desc || table_resolves >= MaxResolvesPerTick) {
+        is_pending = true;
+        return {};
+    }
+    ++table_resolves;
+
+    TableImage entry{.used_tick = gc_tick, .synced_tick = gc_tick};
+    bool aliases_target = false;
+    texture_cache.ForEachImageInRegion(
+        tsharp.Address(), 1,
+        [&](VideoCore::ImageId, VideoCore::Image& image) { aliases_target |= is_target(image); });
+    if (!aliases_target) {
+        VideoCore::TextureCache::ImageDesc desc{tsharp, *image_desc};
+        const auto image_id = texture_cache.FindImage(desc);
+        auto& image = texture_cache.GetImage(image_id);
+        if (!texture_cache.GetAssociatedDepth(image) && !desc.IsSubrectTexture(image.info) &&
+            !is_target(image)) {
+            texture_cache.UpdateImage(image_id);
+            entry.view = *texture_cache.FindTexture(image_id, desc).image_view;
+            entry.image_id = image_id;
+            entry.image_uid = image.image_uid;
+            image.usage.texture = true;
+            needs_barrier |= runtime.Transit(&image, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                             vk::PipelineStageFlagBits2::eAllCommands,
+                                             vk::AccessFlagBits2::eShaderRead);
+        }
+    }
+    table_images.insert_or_assign(key, entry);
+    return entry.view;
+}
+
+u32 Rasterizer::AcquireImageTableSet(u32 num_entries) {
+    static constexpr size_t MaxImageTableSets = 24;
+    const auto is_candidate = [&](const ImageTableSet& set) {
+        return !set.is_current && set.num_entries == num_entries;
+    };
+    for (u32 i = 0; i < image_table_sets.size(); ++i) {
+        const auto& set = image_table_sets[i];
+        if (is_candidate(set) && scheduler.IsFree(set.bound_tick)) {
+            return i;
+        }
+    }
+    if (image_table_sets.size() >= MaxImageTableSets) {
+        // Sets bound in the tick being recorded cannot be waited for without submitting.
+        s32 oldest = -1;
+        for (u32 i = 0; i < image_table_sets.size(); ++i) {
+            const auto& set = image_table_sets[i];
+            if (is_candidate(set) && set.bound_tick < scheduler.CurrentTick() &&
+                (oldest < 0 || set.bound_tick < image_table_sets[oldest].bound_tick)) {
+                oldest = i;
+            }
+        }
+        if (oldest >= 0) {
+            scheduler.Wait(image_table_sets[oldest].bound_tick);
+            return oldest;
+        }
+    }
+
+    auto& set = image_table_sets.emplace_back();
+    set.set = pipeline_cache.GetDescriptorHeap().AllocateTable(vk::DescriptorType::eSampledImage,
+                                                               num_entries);
+    set.num_entries = num_entries;
+    set.keys.assign(num_entries, 0);
+    set.views.assign(num_entries, vk::ImageView{});
+    image_table_infos.assign(num_entries,
+                             vk::DescriptorImageInfo{
+                                 .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                             });
+    const vk::WriteDescriptorSet set_write = {
+        .dstSet = set.set,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = num_entries,
+        .descriptorType = vk::DescriptorType::eSampledImage,
+        .pImageInfo = image_table_infos.data(),
+    };
+    instance.GetDevice().updateDescriptorSets(set_write, {});
+    return static_cast<u32>(image_table_sets.size() - 1);
+}
+
+void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc) {
+    const u64 generation = texture_cache.ImageGeneration();
+    {
+        auto& table = image_tables[table_index];
+        table.has_unresolved = false;
+        image_table_keys.assign(table.num_entries, 0);
+        image_table_views.assign(table.num_entries, vk::ImageView{});
+        for (u32 i = 0; i < table.num_entries; ++i) {
+            AmdGpu::Image tsharp;
+            std::memcpy(&tsharp,
+                        table.shadow.data() +
+                            (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
+                        sizeof(tsharp));
+            const u64 key = TableImageKey(tsharp);
+            if (key == 0) {
+                continue;
+            }
+            const auto view = ResolveTableImage(tsharp, key, image_desc, table.has_unresolved);
+            if (view) {
+                image_table_keys[i] = key;
+                image_table_views[i] = view;
+            }
+        }
+    }
+
+    const u32 set_index = AcquireImageTableSet(image_tables[table_index].num_entries);
+    auto& table = image_tables[table_index];
+    auto& set = image_table_sets[set_index];
+    u32 first = table.num_entries;
+    u32 last = 0;
+    for (u32 i = 0; i < table.num_entries; ++i) {
+        if (set.views[i] != image_table_views[i]) {
+            first = std::min(first, i);
+            last = i;
+        }
+    }
+    if (first <= last) {
+        image_table_infos.clear();
+        for (u32 i = first; i <= last; ++i) {
+            image_table_infos.emplace_back(VK_NULL_HANDLE, image_table_views[i],
+                                           vk::ImageLayout::eShaderReadOnlyOptimal);
+        }
+        const vk::WriteDescriptorSet set_write = {
+            .dstSet = set.set,
+            .dstBinding = 0,
+            .dstArrayElement = first,
+            .descriptorCount = last - first + 1,
+            .descriptorType = vk::DescriptorType::eSampledImage,
+            .pImageInfo = image_table_infos.data(),
+        };
+        instance.GetDevice().updateDescriptorSets(set_write, {});
+    }
+    set.keys.swap(image_table_keys);
+    set.views.swap(image_table_views);
+    set.generation = generation;
+    set.is_current = true;
+    if (table.current_set >= 0 && table.current_set != static_cast<s32>(set_index)) {
+        image_table_sets[table.current_set].is_current = false;
+    }
+    table.current_set = static_cast<s32>(set_index);
+}
+
+vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& image_desc,
+                                               const Shader::Info& stage) {
+    static constexpr u64 EvictInterval = 256;
+    static constexpr u64 EvictAge = 1024;
+
+    const auto vsharp = image_desc.GetTableSharp(stage);
+    const VAddr address = vsharp.base_address;
+    const u32 bytes = vsharp.GetSize();
+    auto it = std::ranges::find_if(image_tables, [&](const ImageTable& table) {
+        return table.address == address && table.bytes == bytes &&
+               table.stride_dw == image_desc.table_stride_dw &&
+               table.offset_dw == image_desc.table_offset_dw &&
+               table.num_entries == image_desc.table_size;
+    });
+    if (it == image_tables.end()) {
+        it = image_tables.insert(image_tables.end(), ImageTable{});
+        it->address = address;
+        it->bytes = bytes;
+        it->stride_dw = image_desc.table_stride_dw;
+        it->offset_dw = image_desc.table_offset_dw;
+        it->num_entries = image_desc.table_size;
+        const u64 shadow_size =
+            (u64{it->num_entries} * it->stride_dw + it->offset_dw) * sizeof(u32) +
+            sizeof(AmdGpu::Image);
+        it->shadow.assign(std::max<u64>(bytes, shadow_size), 0);
+    }
+    const u32 table_index = static_cast<u32>(std::distance(image_tables.begin(), it));
+
+    const u64 gc_tick = texture_cache.GcTick();
+    if (it->current_set < 0 || it->checked_tick != gc_tick) {
+        it->checked_tick = gc_tick;
+        if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
+            std::memcpy(it->shadow.data(), reinterpret_cast<const void*>(address), bytes);
+        } else {
+            std::ranges::fill(it->shadow, u8{0});
+        }
+        BuildImageTableSet(table_index, &image_desc);
+
+        if (gc_tick - table_evict_tick >= EvictInterval) {
+            table_evict_tick = gc_tick;
+            std::erase_if(table_images, [&](const auto& entry) {
+                return entry.second.used_tick + EvictAge < gc_tick;
+            });
+        }
+    }
+
+    auto& table = image_tables[table_index];
+    auto& set = image_table_sets[table.current_set];
+    set.bound_tick = scheduler.CurrentTick();
+    bound_image_tables.emplace_back(table_index, static_cast<u32>(table_sets.size()));
+    return set.set;
+}
+
+void Rasterizer::ValidateImageTableSets() {
+    if (bound_image_tables.empty()) {
+        return;
+    }
+    // Last step before the sets are bound: a view whose image was unregistered after its set
+    // was built must not reach the command buffer.
+    u64 generation;
+    do {
+        generation = texture_cache.ImageGeneration();
+        for (const auto& bound : bound_image_tables) {
+            const s32 current_set = image_tables[bound.table].current_set;
+            if (image_table_sets[current_set].generation == generation) {
+                continue;
+            }
+            const auto is_key_alive = [&](u64 key) {
+                if (key == 0) {
+                    return true;
+                }
+                const auto it = table_images.find(key);
+                return it != table_images.end() &&
+                       texture_cache.TryGetImage(it->second.image_id, it->second.image_uid) !=
+                           nullptr;
+            };
+            const bool is_alive =
+                std::ranges::all_of(image_table_sets[current_set].keys, is_key_alive);
+            if (!is_alive) {
+                BuildImageTableSet(bound.table, nullptr);
+            }
+            auto& set = image_table_sets[image_tables[bound.table].current_set];
+            set.generation = generation;
+            set.bound_tick = scheduler.CurrentTick();
+            table_sets[bound.slot] = set.set;
+        }
+    } while (texture_cache.ImageGeneration() != generation);
 }
 
 vk::Sampler Rasterizer::ResolveSampler(AmdGpu::Sampler ssharp, bool is_depth) {

@@ -113,7 +113,11 @@ public:
 
     u32 Add(const ImageResource& desc) {
         const u32 index{Add(image_resources, desc, [&desc](const auto& existing) {
-            return desc.sharp_fetch == existing.sharp_fetch && desc.is_array == existing.is_array &&
+            return desc.sharp_fetch == existing.sharp_fetch &&
+                   desc.table_fetch == existing.table_fetch &&
+                   desc.table_stride_dw == existing.table_stride_dw &&
+                   desc.table_offset_dw == existing.table_offset_dw &&
+                   desc.table_size == existing.table_size && desc.is_array == existing.is_array &&
                    desc.mip_fallback_mode == existing.mip_fallback_mode &&
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
@@ -244,7 +248,6 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     const bool needs_mip_storage_fallback =
         inst_info.has_lod && is_written && !profile.supports_image_load_store_lod;
     ImageResource image_res = {
-        .sharp_fetch = ConstructSharpFetch<AmdGpu::Image>(resource.sharps[0]),
         .is_depth = bool(inst_info.is_depth),
         .is_atomic = is_atomic,
         .is_array = bool(inst_info.is_array),
@@ -252,6 +255,20 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
         .is_r128 = bool(inst_info.is_r128),
         .post_op = resource.sharps[0].post_op,
     };
+    const auto& image_table = resource.tables[0];
+    if (!image_table.index.IsEmpty()) {
+        ImageResource table_res = image_res;
+        table_res.table_fetch = ConstructSharpFetch<AmdGpu::Buffer>(image_table.sharp);
+        table_res.table_stride_dw = image_table.stride_dw;
+        table_res.table_offset_dw = image_table.offset_dw;
+        table_res.table_size = table_res.NumTableEntries(info);
+        if (table_res.IsTable() && table_res.table_size <= profile.max_image_table_size) {
+            image_res = table_res;
+        }
+    }
+    if (!image_res.IsTable()) {
+        image_res.sharp_fetch = ConstructSharpFetch<AmdGpu::Image>(resource.sharps[0]);
+    }
 
     auto image = image_res.GetSharp(info);
     ASSERT(image.GetType() != AmdGpu::ImageType::Invalid);
@@ -326,36 +343,42 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
 
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
 
+    u32 binding = image_binding;
+    IR::Value image_index = image_res.IsTable() ? image_table.index : IR::Value{};
+    IR::Value sampler_index{};
     if (inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
-        if (const auto& sampler_table = resource.tables[1]; !sampler_table.index.IsEmpty()) {
-            SamplerResource table_res = {
-                .table_fetch = ConstructSharpFetch<AmdGpu::Buffer>(sampler_table.sharp),
-                .table_stride_dw = sampler_table.stride_dw,
-                .table_offset_dw = sampler_table.offset_dw,
-                .post_op = resource.sharps[1].post_op,
-                .is_depth = bool(inst_info.is_depth),
-            };
+        const auto& sampler_table = resource.tables[1];
+        SamplerResource sampler_res = {
+            .post_op = resource.sharps[1].post_op,
+            .is_depth = bool(inst_info.is_depth), // true for the _C (compare) opcodes
+        };
+        if (!sampler_table.index.IsEmpty()) {
+            SamplerResource table_res = sampler_res;
+            table_res.table_fetch = ConstructSharpFetch<AmdGpu::Buffer>(sampler_table.sharp);
+            table_res.table_stride_dw = sampler_table.stride_dw;
+            table_res.table_offset_dw = sampler_table.offset_dw;
             table_res.table_size = table_res.NumTableEntries(info);
-            if (table_res.table_size != 0) {
-                const u32 sampler_binding = descriptors.Add(table_res);
-                const IR::U32 binding = ir.Imm32(image_binding | sampler_binding << 16);
-                inst.SetArg(
-                    0, ir.IndexedImageHandle(binding, ir.Imm32(0U), IR::U32{sampler_table.index}));
-                return;
+            if (table_res.IsTable()) {
+                sampler_res = table_res;
+                sampler_index = sampler_table.index;
             }
         }
-        auto& lod_prod = resource.sharps[1].post_op_data.lod_prod;
-        const u32 sampler_binding = descriptors.Add(SamplerResource{
-            .sharp_fetch = ConstructSharpFetch<AmdGpu::Sampler>(resource.sharps[1]),
-            .post_op = resource.sharps[1].post_op,
-            .post_op_tsharp_dw3_off =
-                lod_prod.IsEmpty() ? UNKNOWN_LOCATION : SharpLocationFromSource(lod_prod.Inst()),
-            .is_depth = bool(inst_info.is_depth), // true for the _C (compare) opcodes
-        });
-        inst.SetArg(0, ir.Imm32(image_binding | sampler_binding << 16));
-    } else {
-        inst.SetArg(0, ir.Imm32(image_binding));
+        if (!sampler_res.IsTable()) {
+            auto& lod_prod = resource.sharps[1].post_op_data.lod_prod;
+            sampler_res.sharp_fetch = ConstructSharpFetch<AmdGpu::Sampler>(resource.sharps[1]);
+            sampler_res.post_op_tsharp_dw3_off =
+                lod_prod.IsEmpty() ? UNKNOWN_LOCATION : SharpLocationFromSource(lod_prod.Inst());
+        }
+        binding |= descriptors.Add(sampler_res) << 16;
     }
+    if (image_index.IsEmpty() && sampler_index.IsEmpty()) {
+        inst.SetArg(0, ir.Imm32(binding));
+        return;
+    }
+    const IR::U32 zero = ir.Imm32(0U);
+    inst.SetArg(0, ir.IndexedImageHandle(ir.Imm32(binding),
+                                         image_index.IsEmpty() ? zero : IR::U32{image_index},
+                                         sampler_index.IsEmpty() ? zero : IR::U32{sampler_index}));
 }
 
 static std::pair<IR::Value, bool> IsMbcntWithExec(IR::Value value, IR::U1 exec) {

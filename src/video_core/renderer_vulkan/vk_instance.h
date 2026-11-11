@@ -376,6 +376,12 @@ public:
         return properties.limits.maxSamplerAnisotropy;
     }
 
+    /// Returns the maximum number of sampled images one stage of a pipeline can access.
+    u32 MaxSampledImageDescriptors() const {
+        return std::min(properties.limits.maxPerStageDescriptorSampledImages,
+                        properties.limits.maxDescriptorSetSampledImages);
+    }
+
     /// Returns the maximum number of push descriptors.
     u32 MaxPushDescriptors() const {
         return push_descriptor_props.maxPushDescriptors;
