@@ -1,0 +1,18 @@
+#!/bin/sh
+# usage: guard   kill the emulator containers when GPU memory or free RAM crosses a limit
+VRAM_MAX=${VRAM_MAX:-12000}; GTT_MAX=${GTT_MAX:-4000}; RAM_MIN=${RAM_MIN:-16000}
+D=$(for d in /sys/class/drm/card*/device; do [ -r $d/mem_info_vram_total ] && echo "$(cat $d/mem_info_vram_total) $d"; done | sort -n | tail -1 | cut -d' ' -f2)
+LOG=$(dirname "$0")/out/guard.log
+while :; do
+  docker ps --format '{{.Names}}' | /bin/busybox grep -q -E '^shad-(run|play)$' || { sleep 1; S=$((S+1)); [ ${S:-0} -gt 30 ] && exit 0; continue; }
+  S=0
+  V=$(( $(cat $D/mem_info_vram_used) / 1048576 )); G=$(( $(cat $D/mem_info_gtt_used) / 1048576 ))
+  R=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+  echo "$(date +%T) vram=$V gtt=$G ramfree=$R" >> "$LOG"
+  if [ $V -gt $VRAM_MAX ] || [ $G -gt $GTT_MAX ] || [ $R -lt $RAM_MIN ]; then
+    docker rm -f shad-run shad-play >/dev/null 2>&1
+    echo "$(date +%T) KILLED vram=$V gtt=$G ramfree=$R" >> "$LOG"
+    exit 1
+  fi
+  sleep 0.5
+done
