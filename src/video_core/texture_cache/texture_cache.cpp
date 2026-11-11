@@ -979,6 +979,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");
     image.flags &= ~ImageFlagBits::Registered;
+    image_generation.fetch_add(1, std::memory_order_release);
     image.memory_usage_counter = nullptr;
     image_lru_cache.Free(image);
     total_used_memory -= Common::AlignUp(image.SizeBytes(), 1024);
@@ -1224,6 +1225,7 @@ void TextureCache::GarbageCollectSamplers() {
             return true;
         }
         --num_deletions;
+        ++sampler_generation;
         sampler_lru_cache.Free(sampler);
         samplers.erase(sampler.hash);
         const auto sampler_id = slot_samplers.GetSlotId(sampler);

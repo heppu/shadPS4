@@ -50,17 +50,7 @@ GraphicsPipeline::GraphicsPipeline(
         .size = sizeof(Shader::PushData),
     };
 
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
-    const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push_constants,
-    };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
+    CreatePipelineLayout(push_constants);
     SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
 
     if (!preloading) {
@@ -481,7 +471,6 @@ template void GraphicsPipeline::GetVertexInputs(
 void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
     u32 binding{};
-    u32 num_array_descriptors{};
 
     for (const auto* stage : stages) {
         if (!stage) {
@@ -511,17 +500,18 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             binding += num_bindings;
         }
         for (const auto& sampler : stage->samplers) {
-            const u32 num_descriptors = sampler.NumDescriptors();
+            if (sampler.IsTable()) {
+                continue;
+            }
             bindings.push_back({
                 .binding = binding++,
                 .descriptorType = vk::DescriptorType::eSampler,
-                .descriptorCount = num_descriptors,
+                .descriptorCount = 1,
                 .stageFlags = stage_bit,
             });
-            num_array_descriptors += num_descriptors - 1;
         }
     }
-    uses_push_descriptors = binding + num_array_descriptors < instance.MaxPushDescriptors();
+    uses_push_descriptors = binding < instance.MaxPushDescriptors();
     const auto flags = uses_push_descriptors
                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
                            : vk::DescriptorSetLayoutCreateFlagBits{};

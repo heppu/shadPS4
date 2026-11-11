@@ -121,6 +121,11 @@ private:
     void BindBuffers(const Shader::Info& stage, Shader::Backend::Bindings& binding,
                      Shader::PushData& push_data);
     void BindTextures(const Shader::Info& stage, Shader::Backend::Bindings& binding);
+    vk::Sampler ResolveSampler(AmdGpu::Sampler ssharp, bool is_depth);
+    void ResolveSamplerTable(const Shader::SamplerResource& sampler, const AmdGpu::Buffer& table,
+                             const Shader::Info& stage);
+    vk::DescriptorSet GetSamplerTableSet(const Shader::SamplerResource& sampler,
+                                         const Shader::Info& stage);
     bool BindResources(const Pipeline* pipeline);
 
     void BindVertexBuffers(const GraphicsPipeline* pipeline);
@@ -163,6 +168,28 @@ private:
     ImageBinding db_desc;
 
     std::vector<vk::DescriptorImageInfo> image_infos;
+
+    struct SamplerTableKey {
+        u64 content_hash;
+        u64 border_color_base;
+        u32 num_entries;
+        u32 stride_dw;
+        u32 offset_dw;
+        Shader::SharpFetchPostOp post_op;
+        bool is_depth;
+
+        bool operator==(const SamplerTableKey&) const = default;
+    };
+    struct SamplerTableSet {
+        SamplerTableKey key;
+        vk::DescriptorSet set;
+        u64 touch_tick;
+    };
+    std::vector<SamplerTableSet> sampler_table_sets;
+    std::vector<vk::DescriptorImageInfo> sampler_table_infos;
+    boost::container::small_vector<vk::DescriptorSet, 4> table_sets;
+    u64 sampler_table_generation{};
+    u64 sampler_table_binds{};
     boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
 
     struct BoundBuffer {

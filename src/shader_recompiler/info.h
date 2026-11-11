@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <span>
 #include <vector>
 #include <boost/container/static_vector.hpp>
@@ -183,7 +184,10 @@ struct Info : InfoPersistent {
 
     void AddBindings(Backend::Bindings& bnd) const {
         bnd.buffer += buffers.size();
-        bnd.unified += buffers.size() + images.size() + samplers.size();
+        const auto num_tables =
+            static_cast<u32>(std::ranges::count_if(samplers, &SamplerResource::IsTable));
+        bnd.unified += buffers.size() + images.size() + samplers.size() - num_tables;
+        bnd.table += num_tables;
     }
 
     void RefreshFlatBuf() {

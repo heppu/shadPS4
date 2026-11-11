@@ -75,8 +75,24 @@ public:
 
     vk::DescriptorSet Commit(vk::DescriptorSetLayout set_layout);
 
+    /// Returns the layout of a set holding one array of `count` descriptors at binding 0.
+    vk::DescriptorSetLayout TableLayout(vk::DescriptorType type, u32 count);
+
+    /// Returns a set with the table layout that stays valid until it is passed to FreeTable.
+    vk::DescriptorSet AllocateTable(vk::DescriptorType type, u32 count);
+
+    void FreeTable(vk::DescriptorType type, u32 count, vk::DescriptorSet set);
+
 private:
+    struct TableSets {
+        vk::DescriptorType type;
+        u32 count;
+        vk::UniqueDescriptorSetLayout layout;
+        std::vector<vk::DescriptorSet> free_sets;
+    };
+
     void CreateDescriptorPool();
+    TableSets& GetTableSets(vk::DescriptorType type, u32 count);
 
 private:
     vk::Device device;
@@ -87,6 +103,8 @@ private:
     std::deque<std::pair<vk::DescriptorPool, u64>> pending_pools;
     using DescSetBatch = boost::container::static_vector<vk::DescriptorSet, DescriptorSetBatch>;
     tsl::robin_map<u64, DescSetBatch> descriptor_sets;
+    std::deque<TableSets> table_sets;
+    std::vector<vk::DescriptorPool> table_pools;
 };
 
 } // namespace Vulkan
