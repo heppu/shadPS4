@@ -4,6 +4,8 @@
 #pragma once
 
 #include <deque>
+#include <span>
+#include <unordered_map>
 #include <boost/container/small_vector.hpp>
 
 #include "common/enum.h"
@@ -52,6 +54,7 @@ class BufferCache {
     static constexpr u64 ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
     static constexpr u64 NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
+    static constexpr u64 RELEASED_MEMORY_SIZE = 16_MB;
     static constexpr u64 STREAM_THRESHOLD = 16_KB;
 
 public:
@@ -93,6 +96,10 @@ public:
 
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks = false);
+
+    /// Releases the backing memory of blocks fully contained in an unmapped region.
+    /// Must be called from the GPU thread.
+    void ReleaseResident(VAddr device_addr, u64 size);
 
     /// Unmark a region as modified from the GPU.
     void UnmarkRegionAsGpuModified(VAddr device_addr, u64 size, bool is_write = false);
@@ -185,6 +192,25 @@ private:
         }
     };
     IntervalList<Backing> resident_ranges;
+    std::unordered_map<VkDeviceMemory, u32> backing_blocks;
+
+    /// Backing of an unmapped region, kept until the GPU is done with the tick it was released in.
+    struct Zombie : public Backing {
+        u64 tick;
+        constexpr bool CanMergeWith(const Zombie& other) const noexcept {
+            return tick == other.tick && Backing::CanMergeWith(other);
+        }
+        constexpr Zombie SubRange(u64 a, u64 b) const noexcept {
+            return {Backing::SubRange(a, b), tick};
+        }
+    };
+    IntervalList<Zombie> zombie_ranges;
+    std::deque<Zombie> zombie_queue;
+    vk::DeviceMemory released_memory;
+
+    void WritePageTable(std::span<const Backing> ranges, bool resident);
+    void ReviveZombies(u64 first_block, u64 last_block);
+    void FreeZombies();
 
     u32 arena_memory_type_index{};
     u32 block_size{};
