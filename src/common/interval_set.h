@@ -156,6 +156,34 @@ public:
         }
     }
 
+    /// Removes provided range from the set, calling 'func' for each removed piece.
+    void Subtract(u64 start, u64 end, auto&& func) {
+        if (start >= end) [[unlikely]] {
+            return;
+        }
+        const auto first = std::ranges::upper_bound(intervals, start, {}, &IV::end);
+        auto last = first;
+        while (last != intervals.end() && last->start < end) {
+            ++last;
+        }
+        if (first == last) {
+            return;
+        }
+        IV keep[2];
+        std::size_t num_keep = 0;
+        if (first->start < start) {
+            keep[num_keep++] = first->SubRange(first->start, start);
+        }
+        if (const auto back = std::prev(last); back->end > end) {
+            keep[num_keep++] = back->SubRange(end, back->end);
+        }
+        for (auto it = first; it != last; ++it) {
+            func(it->SubRange(std::max(it->start, start), std::min(it->end, end)));
+        }
+        const auto pos = intervals.erase(first, last);
+        intervals.insert(pos, keep, keep + num_keep);
+    }
+
 protected:
     /// Returns first interval that overlaps range and first interval after range.
     std::pair<iterator, iterator> OverlapRun(u64 start, u64 end) noexcept {

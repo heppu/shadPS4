@@ -359,7 +359,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 end_block = (first_addr + total_size) >> block_shift;
     auto* new_arena = &arenas.emplace_back(instance, first_addr, total_size, MemoryType::Sparse);
     auto* bind = BindsForArena(new_arena);
-    resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
+    const auto rebind = [&](const Backing& backing) {
         const u64 start = std::max(base_block, backing.start);
         const u64 end = std::min(end_block, backing.end);
         bind->binds.push_back(vk::SparseMemoryBind{
@@ -368,7 +368,9 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
             .memory = backing.memory,
             .memoryOffset = (backing.offset + start - backing.start) << block_shift,
         });
-    });
+    };
+    resident_ranges.ForEachInRange(base_block, end_block, rebind);
+    zombie_ranges.ForEachInRange(base_block, end_block, rebind);
 
     u64 base_page = first_addr >> ARENA_PAGE_BITS;
     for (u32 page = 0; page < (first_size >> ARENA_PAGE_BITS); ++page) {
@@ -382,6 +384,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
 }
 
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block) {
+    ReviveZombies(first_block, last_block);
     u32 resident_blocks{};
     IntervalList bind_ranges;
     resident_ranges.ForEachGap(first_block, last_block + 1, [&](u64 start, u64 end) {
@@ -403,6 +406,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         .memoryTypeIndex = arena_memory_type_index,
     };
     const auto device_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
+    backing_blocks.emplace(device_memory, resident_blocks);
 
     boost::container::small_vector<vk::BufferCopy, 8> copies;
     const auto staging =
@@ -444,6 +448,112 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     if (has_bda) {
         staging.Flush();
         runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+    }
+}
+
+void BufferCache::WritePageTable(std::span<const Backing> ranges, bool resident) {
+    if (ranges.empty() || !instance.IsBufferDeviceAddressSupported()) {
+        return;
+    }
+    u64 num_blocks{};
+    for (const auto& range : ranges) {
+        num_blocks += range.end - range.start;
+    }
+    const auto staging =
+        staging_pool.Request(num_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
+    auto* bda_addrs = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
+    boost::container::small_vector<vk::BufferCopy, 8> copies;
+    u64 offset = staging.offset;
+    for (const auto& range : ranges) {
+        const Buffer* arena = address_space[range.start >> blocks_per_arena_page_shift];
+        const u64 base = arena->BufferDeviceAddress() - arena->cpu_addr;
+        for (u64 block = range.start; block < range.end; ++block) {
+            *(bda_addrs++) = resident ? base + (block << block_shift) : 0;
+        }
+        const u64 copy_size = (range.end - range.start) * sizeof(vk::DeviceAddress);
+        copies.emplace_back(offset, range.start * sizeof(vk::DeviceAddress), copy_size);
+        offset += copy_size;
+    }
+    staging.Flush();
+    runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+}
+
+void BufferCache::ReleaseResident(VAddr device_addr, u64 size) {
+    const u64 first_block = Common::AlignUp(device_addr, u64{block_size}) >> block_shift;
+    const u64 end_block = (device_addr + size) >> block_shift;
+    const u64 tick = scheduler.CurrentTick();
+    boost::container::small_vector<Backing, 8> released;
+    resident_ranges.Subtract(first_block, end_block, [&](const Backing& backing) {
+        released.push_back(backing);
+        const Zombie zombie{backing, tick};
+        zombie_ranges.Add(zombie);
+        zombie_queue.push_back(zombie);
+    });
+    WritePageTable(released, false);
+}
+
+void BufferCache::ReviveZombies(u64 first_block, u64 last_block) {
+    if (zombie_ranges.Empty()) {
+        return;
+    }
+    boost::container::small_vector<Backing, 8> revived;
+    zombie_ranges.Subtract(first_block, last_block + 1, [&](const Zombie& zombie) {
+        revived.push_back(zombie);
+        resident_ranges.Add(zombie);
+    });
+    WritePageTable(revived, true);
+}
+
+void BufferCache::FreeZombies() {
+    if (zombie_queue.empty()) {
+        return;
+    }
+    if (!released_memory) {
+        const vk::MemoryAllocateFlagsInfo alloc_flags = {
+            .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
+        };
+        const vk::MemoryAllocateInfo alloc_info = {
+            .pNext = instance.IsBufferDeviceAddressSupported() ? &alloc_flags : nullptr,
+            .allocationSize = RELEASED_MEMORY_SIZE,
+            .memoryTypeIndex = arena_memory_type_index,
+        };
+        released_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
+    }
+    boost::container::small_vector<Zombie, 8> pending;
+    while (!zombie_queue.empty() && scheduler.IsFree(zombie_queue.front().tick)) {
+        const Zombie entry = zombie_queue.front();
+        zombie_queue.pop_front();
+        zombie_ranges.Subtract(entry.start, entry.end, [&](const Zombie& zombie) {
+            if (zombie.tick > entry.tick) {
+                pending.push_back(zombie);
+                return;
+            }
+            const u64 num_blocks = zombie.end - zombie.start;
+            const Buffer* arena = address_space[zombie.start >> blocks_per_arena_page_shift];
+            // Stray reads of an unbound sparse range fault on the GPU, alias a shared chunk
+            // instead.
+            const u64 resource_offset = (zombie.start << block_shift) - arena->cpu_addr;
+            const u64 total_size = num_blocks << block_shift;
+            auto& binds = BindsForArena(arena)->binds;
+            for (u64 offset = 0; offset < total_size; offset += RELEASED_MEMORY_SIZE) {
+                binds.emplace_back(vk::SparseMemoryBind{
+                    .resourceOffset = resource_offset + offset,
+                    .size = std::min<u64>(RELEASED_MEMORY_SIZE, total_size - offset),
+                    .memory = released_memory,
+                });
+            }
+            const auto it = backing_blocks.find(zombie.memory);
+            it->second -= num_blocks;
+            if (it->second == 0) {
+                backing_blocks.erase(it);
+                scheduler.DeferOperation([device = instance.GetDevice(), memory = zombie.memory] {
+                    device.freeMemory(memory);
+                });
+            }
+        });
+    }
+    for (const auto& zombie : pending) {
+        zombie_ranges.Add(zombie);
     }
 }
 
@@ -535,6 +645,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
 }
 
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
+    FreeZombies();
     if (pending_binds.empty()) {
         return;
     }
