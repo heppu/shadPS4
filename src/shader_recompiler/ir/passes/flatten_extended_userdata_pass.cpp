@@ -170,6 +170,9 @@ struct PassInfo {
     // Bumped during codegen to assign offsets to readconsts
     u16 dst_off_dw;
 
+    bool has_unresolved_offsets{};
+    bool report_unresolved_offsets{};
+
     PtrUserList* GetUsesAsPointer(IR::Inst* inst) {
         auto it = pointer_uses.find(inst);
         if (it != pointer_uses.end()) {
@@ -560,8 +563,10 @@ static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& p
         ABORT_ON_FAILURE(EmitComputeOffsetBitFieldUExtract(c, reg, pass_info, inst));
         return true;
     default:
-        LOG_ERROR(Render_Recompiler, "Unexpected instruction for offset computation, {}",
-                  magic_enum::enum_name(inst->GetOpcode()));
+        if (pass_info.report_unresolved_offsets) {
+            LOG_ERROR(Render_Recompiler, "Unexpected instruction for offset computation, {}",
+                      magic_enum::enum_name(inst->GetOpcode()));
+        }
         return false;
     }
 }
@@ -585,17 +590,26 @@ static inline void PopPtr(Xbyak::CodeGenerator& c) {
     c.pop(rdi);
 }
 
-static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& pass_info,
+static void ReportUnresolvedOffset(PassInfo& pass_info) {
+    pass_info.has_unresolved_offsets = true;
+    if (pass_info.report_unresolved_offsets) {
+        LOG_ERROR(Render_Recompiler, "Failed to compute offset for SRT walker");
+    }
+}
+
+static bool VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& pass_info,
                          Xbyak::CodeGenerator& c) {
     if (subtree->GetOpcode() == IR::Opcode::ReadConst && subtree->Flags<u16>() == 0 ||
         subtree->GetOpcode() == IR::Opcode::ReadConstBuffer &&
             subtree->Flags<IR::BufferInstInfo>().flatbuf_off_dw == 0) {
-        return;
+        return false;
     }
 
+    const size_t subtree_start = c.getSize();
     if (!PushPtr(c, pass_info, off_dw)) {
-        LOG_ERROR(Render_Recompiler, "Failed to compute offset for SRT walker");
-        return;
+        c.setSize(subtree_start);
+        ReportUnresolvedOffset(pass_info);
+        return false;
     }
     PassInfo::PtrUserList* use_list = pass_info.GetUsesAsPointer(subtree);
     ASSERT(use_list);
@@ -605,12 +619,18 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
     // flattened buffer.
     // TODO src and dst are contiguous. Optimize with wider loads/stores
     // TODO if this subtree is dynamically indexed, don't compact it (keep it sparse)
+    bool emitted = false;
     for (auto [src_off_dw, use] : *use_list) {
+        if (GetFlatbufOffset(use) != 0) {
+            continue;
+        }
         if (src_off_dw.IsImmediate()) {
             c.mov(r10d, ptr[rdi + (src_off_dw.U32() << 2)]);
         } else {
+            const size_t use_start = c.getSize();
             if (!ComputeOffset(c, r10d, pass_info, src_off_dw)) {
-                LOG_ERROR(Render_Recompiler, "Failed to compute offset for SRT walker");
+                c.setSize(use_start);
+                ReportUnresolvedOffset(pass_info);
                 continue;
             }
             c.shl(r10d, 2);
@@ -621,16 +641,22 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
 
         SetFlatbufOffset(use, pass_info.dst_off_dw);
         pass_info.dst_off_dw++;
+        emitted = true;
     }
 
     // Then visit any children used as pointers
     for (const auto [src_off_dw, use] : *use_list) {
         if (pass_info.GetUsesAsPointer(use)) {
-            VisitPointer(src_off_dw, use, pass_info, c);
+            emitted |= VisitPointer(src_off_dw, use, pass_info, c);
         }
     }
 
+    if (!emitted) {
+        c.setSize(subtree_start);
+        return false;
+    }
     PopPtr(c);
+    return true;
 }
 
 static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
@@ -653,8 +679,21 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
     pass_info.dst_off_dw = NUM_USER_DATA_REGS;
     ASSERT(pass_info.dst_off_dw == info.srt_info.flattened_bufsize_dw);
 
-    for (const auto& [sgpr_base, root] : pass_info.srt_roots) {
-        VisitPointer(IR::Value(static_cast<u32>(sgpr_base)), root, pass_info, c);
+    const auto visit_roots = [&] {
+        bool emitted = false;
+        pass_info.has_unresolved_offsets = false;
+        for (const auto& [sgpr_base, root] : pass_info.srt_roots) {
+            emitted |= VisitPointer(IR::Value(static_cast<u32>(sgpr_base)), root, pass_info, c);
+        }
+        return emitted;
+    };
+    // An offset can depend on a read that a later subtree flattens, so revisit until settled.
+    while (visit_roots() && pass_info.has_unresolved_offsets) {
+        continue;
+    }
+    if (pass_info.has_unresolved_offsets) {
+        pass_info.report_unresolved_offsets = true;
+        visit_roots();
     }
 
     c.ret();
