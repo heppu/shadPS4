@@ -1007,12 +1007,23 @@ void EmitContext::DefineImagesAndSamplers() {
         if (mip_fallback_mode == MipStorageFallbackMode::DynamicIndex) {
             pointee_type = TypeArray(pointee_type, ConstU32(num_bindings));
         }
+        if (image_desc.IsTable()) {
+            pointee_type = TypeArray(image_type, ConstU32(image_desc.table_size));
+            AddCapability(spv::Capability::SampledImageArrayDynamicIndexing);
+            AddCapability(spv::Capability::ShaderNonUniform);
+            AddCapability(spv::Capability::SampledImageArrayNonUniformIndexing);
+        }
 
         const Id pointer_type{TypePointer(spv::StorageClass::UniformConstant, pointee_type)};
         const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
-        Decorate(id, spv::Decoration::Binding, binding.unified);
-        binding.unified += num_bindings;
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        if (image_desc.IsTable()) {
+            Decorate(id, spv::Decoration::Binding, 0U);
+            Decorate(id, spv::Decoration::DescriptorSet, 1U + binding.table++);
+        } else {
+            Decorate(id, spv::Decoration::Binding, binding.unified);
+            binding.unified += num_bindings;
+            Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        }
         Name(id, fmt::format("{}_{}{}", hw_stage, "img", images.size()));
         images.push_back({
             .data_types = &data_types,
@@ -1023,6 +1034,7 @@ void EmitContext::DefineImagesAndSamplers() {
             .is_integer = is_integer,
             .is_storage = is_storage,
             .mip_fallback_mode = mip_fallback_mode,
+            .table_size = image_desc.table_size,
         });
         interfaces.push_back(id);
     }
