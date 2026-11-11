@@ -318,6 +318,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supported_spirv = SpirvVersion1_6,
         .subgroup_size = instance.SubgroupSize(),
         .sparse_page_shift = sparse_page_shift,
+        .max_image_table_size =
+            instance.IsSampledImageArrayNonUniformIndexingSupported()
+                ? std::min(Shader::MAX_IMAGE_TABLE_SIZE, instance.MaxSampledImageDescriptors() / 4)
+                : 0,
         .support_int8 = instance.IsShaderInt8Supported(),
         .support_int16 = instance.IsShaderInt16Supported(),
         .support_int64 = instance.IsShaderInt64Supported(),

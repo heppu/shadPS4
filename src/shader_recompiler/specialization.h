@@ -52,6 +52,7 @@ struct ImageSpecialization {
     AmdGpu::NumberConversion num_conversion{};
     // FIXME any pipeline cache changes needed?
     u32 num_bindings = 0;
+    u32 table_size = 0;
 
     bool operator==(const ImageSpecialization&) const = default;
 };
@@ -152,6 +153,11 @@ struct StageSpecialization {
                          spec.force_unnormalized = sharp.force_unnormalized;
                          spec.force_degamma = sharp.force_degamma;
                      });
+        for (u32 i = 0; i < info->images.size(); i++) {
+            if (info->images[i].IsTable()) {
+                images[i].table_size = info->images[i].NumTableEntries(*info);
+            }
+        }
         for (u32 i = 0; i < info->samplers.size(); i++) {
             samplers[i].table_size = info->samplers[i].NumTableEntries(*info);
         }
@@ -233,6 +239,9 @@ struct StageSpecialization {
             }
         }
         for (u32 i = 0; i < images.size(); i++) {
+            if (images[i].table_size != other.images[i].table_size) {
+                return false;
+            }
             if (other.bitset[binding++] && images[i] != other.images[i]) {
                 return false;
             }

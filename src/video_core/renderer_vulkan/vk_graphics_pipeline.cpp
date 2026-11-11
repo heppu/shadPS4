@@ -489,6 +489,9 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             });
         }
         for (const auto& image : stage->images) {
+            if (image.IsTable()) {
+                continue;
+            }
             const u32 num_bindings = image.NumBindings(*stage);
             bindings.push_back({
                 .binding = binding,

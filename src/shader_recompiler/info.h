@@ -185,7 +185,8 @@ struct Info : InfoPersistent {
     void AddBindings(Backend::Bindings& bnd) const {
         bnd.buffer += buffers.size();
         const auto num_tables =
-            static_cast<u32>(std::ranges::count_if(samplers, &SamplerResource::IsTable));
+            static_cast<u32>(std::ranges::count_if(images, &ImageResource::IsTable) +
+                             std::ranges::count_if(samplers, &SamplerResource::IsTable));
         bnd.unified += buffers.size() + images.size() + samplers.size() - num_tables;
         bnd.table += num_tables;
     }
