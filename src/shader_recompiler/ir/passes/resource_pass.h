@@ -27,9 +27,18 @@ struct SharpReference {
     PostOpData post_op_data;
 };
 
+/// A sharp fetched as table[index * stride_dw + offset_dw] from the buffer described by `sharp`.
+struct SharpTableReference {
+    SharpReference sharp{};
+    IR::Value index{};
+    u32 stride_dw{};
+    u32 offset_dw{};
+};
+
 struct ResourceDiscovery {
     IR::Inst* user{};
     std::array<SharpReference, 2> sharps;
+    std::array<SharpTableReference, 2> tables;
 };
 using ResourceDiscoveryList = boost::container::small_vector<ResourceDiscovery, 32>;
 

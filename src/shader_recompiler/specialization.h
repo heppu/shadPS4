@@ -66,6 +66,7 @@ struct FMaskSpecialization {
 struct SamplerSpecialization {
     u8 force_unnormalized : 1;
     u8 force_degamma : 1;
+    u32 table_size{};
 
     bool operator==(const SamplerSpecialization&) const = default;
 };
@@ -151,6 +152,9 @@ struct StageSpecialization {
                          spec.force_unnormalized = sharp.force_unnormalized;
                          spec.force_degamma = sharp.force_degamma;
                      });
+        for (u32 i = 0; i < info->samplers.size(); i++) {
+            samplers[i].table_size = info->samplers[i].NumTableEntries(*info);
+        }
 
         // Initialize runtime_info fields that rely on analysis in tessellation passes
         if (info->sw_stage == SwStage::TessellationControl ||
