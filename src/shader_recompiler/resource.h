@@ -229,8 +229,8 @@ struct SamplerResource {
         return ApplyPostOp(sampler, info);
     }
 
-    u32 NumDescriptors() const noexcept {
-        return table_size != 0 ? table_size : 1;
+    bool IsTable() const noexcept {
+        return table_size != 0;
     }
 
     constexpr AmdGpu::Sampler ApplyPostOp(AmdGpu::Sampler sampler,

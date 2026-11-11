@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -288,6 +289,20 @@ public:
     /// Runs the garbage collector.
     void RunGarbageCollector();
 
+    [[nodiscard]] u64 GcTick() const noexcept {
+        return gc_tick;
+    }
+
+    /// Changes whenever a sampler handed out by GetSampler has been destroyed.
+    [[nodiscard]] u64 SamplerGeneration() const noexcept {
+        return sampler_generation;
+    }
+
+    /// Changes whenever an image stops being registered, on any thread.
+    [[nodiscard]] u64 ImageGeneration() const noexcept {
+        return image_generation.load(std::memory_order_acquire);
+    }
+
     template <typename Func>
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
         std::scoped_lock lk{registry_mutex};
@@ -437,6 +452,8 @@ private:
     const bool readback_linear_images;
     /// Guards the page table, LRU cache and usage counter, which unmapping guest threads touch.
     std::recursive_mutex registry_mutex;
+    u64 sampler_generation = 0;
+    std::atomic<u64> image_generation = 0;
     std::mutex download_images_mutex;
     absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
 };
