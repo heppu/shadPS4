@@ -290,6 +290,7 @@ public:
 
     template <typename Func>
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
+        std::scoped_lock lk{registry_mutex};
         using FuncReturn = typename std::invoke_result<Func, ImageId, Image&>::type;
         static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
         const u64 first_page = cpu_addr >> Traits::PAGE_BITS;
@@ -327,6 +328,7 @@ public:
 
     template <typename Func>
     void ForEachImageWithAddress(VAddr cpu_addr, Func&& func) {
+        std::scoped_lock lk{registry_mutex};
         const auto it = page_table.find(cpu_addr >> Traits::PAGE_BITS);
         if (it == nullptr) {
             return;
@@ -390,6 +392,11 @@ private:
 
     /// Removes image from the cache and schedules it for deletion.
     void FreeImage(ImageId image_id) {
+        std::scoped_lock registry_lk{registry_mutex};
+        if (False(slot_images[image_id].flags & ImageFlagBits::Registered)) {
+            // A guest thread unmapping the memory freed the image first.
+            return;
+        }
         {
             std::scoped_lock lk{slot_images[image_id].mutex};
             UntrackImage(image_id);
@@ -428,6 +435,8 @@ private:
     Common::LRUCache<Image> image_lru_cache;
     Common::LRUCache<Sampler> sampler_lru_cache;
     const bool readback_linear_images;
+    /// Guards the page table, LRU cache and usage counter, which unmapping guest threads touch.
+    std::recursive_mutex registry_mutex;
     std::mutex download_images_mutex;
     absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
 };

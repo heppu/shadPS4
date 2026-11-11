@@ -252,6 +252,7 @@ void TextureCache::MarkAsMaybeGpuDirty(VAddr addr, size_t size) {
 }
 
 void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
+    std::scoped_lock lk{registry_mutex};
     SmallVector<ImageId, 16> deleted_images;
     ForEachImageInRegion(cpu_addr, size, [&](ImageId id, Image&) { deleted_images.push_back(id); });
     for (const ImageId id : deleted_images) {
@@ -953,6 +954,7 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sharp,
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
+    std::scoped_lock lk{registry_mutex};
     Image& image = slot_images[image_id];
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
@@ -972,6 +974,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
+    std::scoped_lock lk{registry_mutex};
     Image& image = slot_images[image_id];
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");
@@ -1093,6 +1096,7 @@ void TextureCache::MarkDirtyIfEdgesModified(Image& image) {
 }
 
 void TextureCache::GarbageCollectImages() {
+    std::scoped_lock lk{registry_mutex};
     if (instance.CanReportMemoryUsage()) {
         total_used_memory = instance.GetDeviceMemoryUsage();
     }
@@ -1245,6 +1249,7 @@ void TextureCache::RunGarbageCollector() {
 }
 
 void TextureCache::TouchImage(Image& image) {
+    std::scoped_lock lk{registry_mutex};
     image_lru_cache.Touch(image, gc_tick);
 }
 
