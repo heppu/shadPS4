@@ -1037,7 +1037,15 @@ void EmitContext::DefineImagesAndSamplers() {
     sampler_type = TypeSampler();
     sampler_pointer_type = TypePointer(spv::StorageClass::UniformConstant, sampler_type);
     for (const auto& samp_desc : info.samplers) {
-        const Id id{AddGlobalVariable(sampler_pointer_type, spv::StorageClass::UniformConstant)};
+        Id pointer_type{sampler_pointer_type};
+        if (samp_desc.table_size != 0) {
+            const Id array_type{TypeArray(sampler_type, ConstU32(samp_desc.table_size))};
+            pointer_type = TypePointer(spv::StorageClass::UniformConstant, array_type);
+            AddCapability(spv::Capability::SampledImageArrayDynamicIndexing);
+            AddCapability(spv::Capability::ShaderNonUniform);
+            AddCapability(spv::Capability::SampledImageArrayNonUniformIndexing);
+        }
+        const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
         Decorate(id, spv::Decoration::Binding, binding.unified++);
         Decorate(id, spv::Decoration::DescriptorSet, 0U);
         Name(id, fmt::format("{}_{}{}", hw_stage, "samp", samplers.size()));
