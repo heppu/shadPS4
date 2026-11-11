@@ -207,6 +207,31 @@ void ImageInfo::UpdateSize() noexcept {
                      &guest_size, &micro_tiled_mips, mips_layout.data());
 }
 
+bool ImageInfo::DropLeadingMips(u32 count) noexcept {
+    if (count == 0 || count >= resources.levels || resources.layers != 1 || num_samples != 1 ||
+        type != AmdGpu::ImageType::Color2D || props.is_depth) {
+        return false;
+    }
+    ImageInfo rebased = *this;
+    const auto& first = mips_layout[count];
+    rebased.guest_address += first.offset;
+    rebased.size.width = std::max(size.width >> count, 1u);
+    rebased.size.height = std::max(size.height >> count, 1u);
+    rebased.pitch = first.pitch;
+    rebased.resources.levels -= count;
+    rebased.UpdateSize();
+    for (u32 mip = 0; mip < rebased.resources.levels; ++mip) {
+        const auto& lhs = rebased.mips_layout[mip];
+        const auto& rhs = mips_layout[mip + count];
+        if (lhs.size != rhs.size || lhs.pitch != rhs.pitch || lhs.height != rhs.height ||
+            lhs.offset != rhs.offset - first.offset) {
+            return false;
+        }
+    }
+    *this = rebased;
+    return true;
+}
+
 s32 ImageInfo::MipOf(const ImageInfo& info) const {
     if (!IsCompatible(info)) {
         return -1;

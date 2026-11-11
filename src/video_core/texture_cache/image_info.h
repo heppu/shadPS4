@@ -52,6 +52,9 @@ struct ImageInfo {
         return Extent2D{pitch >> dim, size.height >> dim};
     }
 
+    /// Rebases the image onto mip `count` when the remaining chain keeps its guest layout.
+    bool DropLeadingMips(u32 count) noexcept;
+
     s32 MipOf(const ImageInfo& info) const;
     s32 SliceOf(const ImageInfo& info, s32 mip) const;
 
