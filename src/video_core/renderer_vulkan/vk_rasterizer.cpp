@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <xxhash.h>
 #include "common/debug.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
@@ -216,7 +217,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         runtime.FlushBarriers();
     }
 
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes, push_data, table_sets);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -290,7 +291,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         runtime.FlushBarriers();
     }
 
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes, push_data, table_sets);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -348,7 +349,7 @@ void Rasterizer::DispatchDirect() {
     }
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes, push_data, table_sets);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -383,7 +384,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     }
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes, push_data, table_sets);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -438,6 +439,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     set_writes.clear();
     buffer_infos.clear();
     image_infos.clear();
+    table_sets.clear();
 
     size_t num_image_infos{};
     for (const auto* stage : pipeline->GetStages()) {
@@ -447,9 +449,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         for (const auto& image : stage->images) {
             num_image_infos += image.NumBindings(*stage);
         }
-        for (const auto& sampler : stage->samplers) {
-            num_image_infos += sampler.NumDescriptors();
-        }
+        num_image_infos += stage->samplers.size();
     }
     image_infos.reserve(num_image_infos);
 
@@ -462,8 +462,10 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         if (!stage) {
             continue;
         }
+        const auto num_tables =
+            std::ranges::count_if(stage->samplers, &Shader::SamplerResource::IsTable);
         set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
-                          stage->samplers.size());
+                          stage->samplers.size() - num_tables);
         BindBuffers(*stage, binding, push_data);
         BindTextures(*stage, binding);
         uses_dma |= stage->uses_dma;
@@ -1047,45 +1049,116 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         binding.unified += array_size;
     }
 
-    const auto bind_sampler = [&](const Shader::SamplerResource& sampler, AmdGpu::Sampler ssharp) {
-        if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
-                                liverpool->regs.ta_bc_base.Address() == 0)) {
-            LOG_WARNING(Render_Vulkan,
-                        "Rejecting invalid S# max_aniso={}, filter_mode={}, mip_filter={}, "
-                        "border_color_type={}, border_color_base={:#x}",
-                        static_cast<u32>(ssharp.max_aniso.Value()),
-                        static_cast<u32>(ssharp.filter_mode.Value()),
-                        static_cast<u32>(ssharp.mip_filter.Value()),
-                        static_cast<u32>(ssharp.border_color_type.Value()),
-                        liverpool->regs.ta_bc_base.Address());
-            ssharp = AmdGpu::Sampler{};
-        }
-        const auto vk_sampler =
-            texture_cache.GetSampler(ssharp, liverpool->regs.ta_bc_base, sampler.is_depth);
-        image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
-    };
-
     for (const auto& sampler : stage.samplers) {
-        const size_t first_sampler_idx = image_infos.size();
-        if (sampler.table_size != 0) {
-            auto table = sampler.GetTableSharp(stage);
-            if (!memory->IsValidMapping(table.base_address, table.GetSize())) {
-                table = AmdGpu::Buffer::Null();
-            }
-            for (u32 i = 0; i < sampler.table_size; ++i) {
-                bind_sampler(sampler, sampler.GetTableEntry(table, i, stage));
-            }
-        } else {
-            bind_sampler(sampler, sampler.GetSharp(stage));
+        if (sampler.IsTable()) {
+            table_sets.push_back(GetSamplerTableSet(sampler, stage));
+            continue;
         }
+        const auto vk_sampler = ResolveSampler(sampler.GetSharp(stage), sampler.is_depth);
+        image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
         auto& set_write = set_writes[set_write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified++;
         set_write.dstArrayElement = 0;
-        set_write.descriptorCount = sampler.NumDescriptors();
+        set_write.descriptorCount = 1;
         set_write.descriptorType = vk::DescriptorType::eSampler;
-        set_write.pImageInfo = &image_infos[first_sampler_idx];
+        set_write.pImageInfo = &image_infos.back();
     }
+}
+
+vk::Sampler Rasterizer::ResolveSampler(AmdGpu::Sampler ssharp, bool is_depth) {
+    if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
+                            liverpool->regs.ta_bc_base.Address() == 0)) {
+        LOG_WARNING(Render_Vulkan,
+                    "Rejecting invalid S# max_aniso={}, filter_mode={}, mip_filter={}, "
+                    "border_color_type={}, border_color_base={:#x}",
+                    static_cast<u32>(ssharp.max_aniso.Value()),
+                    static_cast<u32>(ssharp.filter_mode.Value()),
+                    static_cast<u32>(ssharp.mip_filter.Value()),
+                    static_cast<u32>(ssharp.border_color_type.Value()),
+                    liverpool->regs.ta_bc_base.Address());
+        ssharp = AmdGpu::Sampler{};
+    }
+    return texture_cache.GetSampler(ssharp, liverpool->regs.ta_bc_base, is_depth);
+}
+
+void Rasterizer::ResolveSamplerTable(const Shader::SamplerResource& sampler,
+                                     const AmdGpu::Buffer& table, const Shader::Info& stage) {
+    sampler_table_infos.clear();
+    for (u32 i = 0; i < sampler.table_size; ++i) {
+        const auto vk_sampler =
+            ResolveSampler(sampler.GetTableEntry(table, i, stage), sampler.is_depth);
+        sampler_table_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+    }
+}
+
+vk::DescriptorSet Rasterizer::GetSamplerTableSet(const Shader::SamplerResource& sampler,
+                                                 const Shader::Info& stage) {
+    static constexpr size_t MaxSamplerTableSets = 64;
+
+    auto table = sampler.GetTableSharp(stage);
+    if (!memory->IsValidMapping(table.base_address, table.GetSize())) {
+        table = AmdGpu::Buffer::Null();
+    }
+    const u64 table_bytes = table.GetSize();
+    const SamplerTableKey key = {
+        .content_hash =
+            table_bytes != 0
+                ? XXH3_64bits(reinterpret_cast<const void*>(VAddr{table.base_address}), table_bytes)
+                : 0,
+        .border_color_base = liverpool->regs.ta_bc_base.Address(),
+        .num_entries = sampler.table_size,
+        .stride_dw = sampler.table_stride_dw,
+        .offset_dw = sampler.table_offset_dw,
+        .post_op = sampler.post_op,
+        .is_depth = sampler.is_depth,
+    };
+    ++sampler_table_binds;
+
+    // Sets are immutable once written, so a destroyed sampler invalidates all of them.
+    auto& desc_heap = pipeline_cache.GetDescriptorHeap();
+    const u64 generation = texture_cache.SamplerGeneration();
+    if (generation != sampler_table_generation ||
+        sampler_table_sets.size() >= MaxSamplerTableSets) {
+        for (const auto& entry : sampler_table_sets) {
+            scheduler.DeferOperation(
+                [&desc_heap, num_entries = entry.key.num_entries, set = entry.set] {
+                    desc_heap.FreeTable(vk::DescriptorType::eSampler, num_entries, set);
+                });
+        }
+        sampler_table_sets.clear();
+        sampler_table_generation = generation;
+    }
+
+    const u64 gc_tick = texture_cache.GcTick();
+    const auto it = std::ranges::find(sampler_table_sets, key, &SamplerTableSet::key);
+    if (it != sampler_table_sets.end()) {
+        if (it->touch_tick != gc_tick) {
+            ResolveSamplerTable(sampler, table, stage);
+            it->touch_tick = gc_tick;
+        }
+        return it->set;
+    }
+
+    ResolveSamplerTable(sampler, table, stage);
+    const auto set = desc_heap.AllocateTable(vk::DescriptorType::eSampler, sampler.table_size);
+    const vk::WriteDescriptorSet set_write = {
+        .dstSet = set,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = sampler.table_size,
+        .descriptorType = vk::DescriptorType::eSampler,
+        .pImageInfo = sampler_table_infos.data(),
+    };
+    instance.GetDevice().updateDescriptorSets(set_write, {});
+    LOG_INFO(Render_Vulkan,
+             "Built sampler table set: address={:#x}, entries={}, cached sets={}, binds since "
+             "previous build={}",
+             u64{table.base_address}, sampler.table_size, sampler_table_sets.size() + 1,
+             sampler_table_binds);
+    sampler_table_binds = 0;
+    sampler_table_sets.emplace_back(key, set, gc_tick);
+    return set;
 }
 
 RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {

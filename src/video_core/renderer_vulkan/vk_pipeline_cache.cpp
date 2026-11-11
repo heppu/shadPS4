@@ -34,7 +34,7 @@ constexpr static std::array DescriptorHeapSizes = {
     vk::DescriptorPoolSize{vk::DescriptorType::eStorageBuffer, 8192},
     vk::DescriptorPoolSize{vk::DescriptorType::eSampledImage, 8192},
     vk::DescriptorPoolSize{vk::DescriptorType::eStorageImage, 1024},
-    vk::DescriptorPoolSize{vk::DescriptorType::eSampler, 32768},
+    vk::DescriptorPoolSize{vk::DescriptorType::eSampler, 1024},
 };
 
 static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsOutputControl& ctl) {

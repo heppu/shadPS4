@@ -58,10 +58,12 @@ public:
     }
 
     using DescriptorWrites = std::vector<vk::WriteDescriptorSet>;
-    void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data) const;
+    void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data,
+                       std::span<const vk::DescriptorSet> table_sets) const;
 
 protected:
     [[nodiscard]] std::string GetDebugString() const;
+    void CreatePipelineLayout(const vk::PushConstantRange& push_constants);
 
     const Instance& instance;
     Scheduler& scheduler;
