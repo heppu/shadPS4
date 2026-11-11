@@ -99,7 +99,18 @@ public:
         ImageDesc() = default;
         ImageDesc(const AmdGpu::Image& image, const Shader::ImageResource& desc)
             : info{image, desc}, view_info{image, desc},
-              type{desc.is_written ? BindingType::Storage : BindingType::Texture} {}
+              type{desc.is_written ? BindingType::Storage : BindingType::Texture} {
+            // Mips below the minimum LOD cannot be sampled and may not be backed by the guest.
+            auto& range = view_info.range;
+            const u32 view_end = range.base.level + range.extent.levels;
+            const u32 skipped = std::min<u32>(image.min_lod >> 8, view_end - 1);
+            if (type == BindingType::Texture && info.DropLeadingMips(skipped)) {
+                const u32 view_base = std::max<u32>(range.base.level, skipped);
+                range.base.level = view_base - skipped;
+                range.extent.levels = view_end - view_base;
+                view_info.min_lod -= skipped << 8;
+            }
+        }
         ImageDesc(const AmdGpu::ColorBuffer& buffer, AmdGpu::CbDbExtent hint)
             : info{buffer, hint}, view_info{buffer}, type{BindingType::RenderTarget} {}
         ImageDesc(const AmdGpu::DepthBuffer& buffer, AmdGpu::DepthView view,
