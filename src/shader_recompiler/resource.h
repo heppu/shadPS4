@@ -7,6 +7,7 @@
 #include "shader_recompiler/ir/type.h"
 #include "video_core/amdgpu/resource.h"
 
+#include <algorithm>
 #include <boost/container/static_vector.hpp>
 
 namespace Shader {
@@ -15,6 +16,7 @@ static constexpr u32 NUM_USER_DATA_REGS = 16;
 static constexpr u32 NUM_IMAGES = 64;
 static constexpr u32 NUM_BUFFERS = 56;
 static constexpr u32 NUM_SAMPLERS = 16;
+static constexpr u32 MAX_SAMPLER_TABLE_SIZE = 256;
 static constexpr u32 NUM_FMASKS = 8;
 
 using SharpLocation = u16;
@@ -181,6 +183,10 @@ using ImageResourceList = boost::container::static_vector<ImageResource, NUM_IMA
 
 struct SamplerResource {
     SharpFetch<AmdGpu::Sampler> sharp_fetch{};
+    SharpFetch<AmdGpu::Buffer> table_fetch{};
+    u32 table_stride_dw{};
+    u32 table_offset_dw{};
+    u32 table_size{};
     SharpFetchPostOp post_op{};
     SharpLocation post_op_tsharp_dw3_off{};
     bool is_depth{};
@@ -188,6 +194,47 @@ struct SamplerResource {
     constexpr AmdGpu::Sampler GetSharp(const auto& info) const noexcept {
         AmdGpu::Sampler sampler{};
         sharp_fetch.Fetch(info.flattened_ud_buf.data(), &sampler);
+        return ApplyPostOp(sampler, info);
+    }
+
+    constexpr AmdGpu::Buffer GetTableSharp(const auto& info) const noexcept {
+        AmdGpu::Buffer table;
+        if (!table_fetch.Fetch(info.flattened_ud_buf.data(), &table)) {
+            return AmdGpu::Buffer::Null();
+        }
+        return table;
+    }
+
+    u32 NumTableEntries(const auto& info) const noexcept {
+        if (table_stride_dw == 0) {
+            return 0;
+        }
+        constexpr u64 entry_dwords = sizeof(AmdGpu::Sampler) / sizeof(u32);
+        const u64 table_dwords = GetTableSharp(info).GetSize() / sizeof(u32);
+        if (table_dwords < table_offset_dw + entry_dwords) {
+            return 0;
+        }
+        const u64 last_entry = (table_dwords - table_offset_dw - entry_dwords) / table_stride_dw;
+        return static_cast<u32>(std::min<u64>(last_entry + 1, MAX_SAMPLER_TABLE_SIZE));
+    }
+
+    AmdGpu::Sampler GetTableEntry(const AmdGpu::Buffer& table, u32 index,
+                                  const auto& info) const noexcept {
+        AmdGpu::Sampler sampler{};
+        const u64 offset = (u64{index} * table_stride_dw + table_offset_dw) * sizeof(u32);
+        if (offset + sizeof(sampler) <= table.GetSize()) {
+            std::memcpy(&sampler, reinterpret_cast<const void*>(table.base_address + offset),
+                        sizeof(sampler));
+        }
+        return ApplyPostOp(sampler, info);
+    }
+
+    u32 NumDescriptors() const noexcept {
+        return table_size != 0 ? table_size : 1;
+    }
+
+    constexpr AmdGpu::Sampler ApplyPostOp(AmdGpu::Sampler sampler,
+                                          const auto& info) const noexcept {
         if (post_op == SharpFetchPostOp::DisableAnisoIfSingleLod) {
             const u32 tsharp_dw3 = info.flattened_ud_buf[post_op_tsharp_dw3_off];
             if (((tsharp_dw3 >> 12) & 0xff) == 0) {

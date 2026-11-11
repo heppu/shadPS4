@@ -241,6 +241,12 @@ public:
         return vk12_features.shaderSharedInt64Atomics;
     }
 
+    /// Returns true if arrays of samplers and sampled images can be indexed non-uniformly
+    bool IsSampledImageArrayNonUniformIndexingSupported() const {
+        return features.shaderSampledImageArrayDynamicIndexing &&
+               vk12_features.shaderSampledImageArrayNonUniformIndexing;
+    }
+
     /// Returns true when buffer device address can be used. RenderDoc hides it on drivers that
     /// lack bufferDeviceAddressCaptureReplay.
     bool IsBufferDeviceAddressSupported() const {

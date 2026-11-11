@@ -2153,6 +2153,11 @@ Value IREmitter::ImageHandle(const Value& tsharp_low, const Value& tsharp_high) 
     return Inst(Opcode::ImageHandle, tsharp_low, tsharp_high);
 }
 
+Value IREmitter::IndexedImageHandle(const U32& binding, const U32& image_index,
+                                    const U32& sampler_index) {
+    return Inst(Opcode::IndexedImageHandle, binding, image_index, sampler_index);
+}
+
 Value IREmitter::ImageSampleRaw(const Value& image_handle, const Value& sampler_handle,
                                 const Value& address1, const Value& address2, const Value& address3,
                                 const Value& address4, TextureInstInfo info) {
