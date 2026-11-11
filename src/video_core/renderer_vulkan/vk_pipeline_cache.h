@@ -42,6 +42,8 @@ struct Program {
     struct Module {
         vk::ShaderModule module;
         Shader::StageSpecialization spec;
+        /// Resources of this permutation when they were compiled apart from the program info.
+        std::unique_ptr<Shader::Info> info;
     };
     static constexpr size_t MaxPermutations = 8;
     using ModuleList = boost::container::small_vector<Module, MaxPermutations>;
@@ -53,14 +55,20 @@ struct Program {
     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)
         : info{stage, l_stage, params} {}
 
-    void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
-        modules.emplace_back(module, std::move(spec));
+    void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
+                   std::unique_ptr<Shader::Info> perm_info = nullptr) {
+        modules.emplace_back(module, std::move(spec), std::move(perm_info));
     }
 
-    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
-                      size_t perm_idx) {
+    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec, size_t perm_idx,
+                      std::unique_ptr<Shader::Info> perm_info = nullptr) {
         modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
-        modules[perm_idx] = {module, std::move(spec)};
+        modules[perm_idx] = {module, std::move(spec), std::move(perm_info)};
+    }
+
+    Shader::Info& PermutInfo(size_t perm_idx) {
+        auto& perm_info = modules[perm_idx].info;
+        return perm_info ? *perm_info : info;
     }
 };
 
