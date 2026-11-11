@@ -1,6 +1,6 @@
 #!/bin/sh
 # usage: guard   kill the emulator containers when GPU memory or free RAM crosses a limit
-VRAM_MAX=${VRAM_MAX:-12000}; GTT_MAX=${GTT_MAX:-4000}; RAM_MIN=${RAM_MIN:-16000}
+VRAM_MAX=${VRAM_MAX:-12000}; GTT_MAX=${GTT_MAX:-4000}; RAM_MIN=${RAM_MIN:-10000}
 D=$(for d in /sys/class/drm/card*/device; do [ -r $d/mem_info_vram_total ] && echo "$(cat $d/mem_info_vram_total) $d"; done | sort -n | tail -1 | cut -d' ' -f2)
 LOG=$(dirname "$0")/out/guard.log
 while :; do
