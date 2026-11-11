@@ -1046,8 +1046,13 @@ void EmitContext::DefineImagesAndSamplers() {
             AddCapability(spv::Capability::SampledImageArrayNonUniformIndexing);
         }
         const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
-        Decorate(id, spv::Decoration::Binding, binding.unified++);
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        if (samp_desc.IsTable()) {
+            Decorate(id, spv::Decoration::Binding, 0U);
+            Decorate(id, spv::Decoration::DescriptorSet, 1U + binding.table++);
+        } else {
+            Decorate(id, spv::Decoration::Binding, binding.unified++);
+            Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        }
         Name(id, fmt::format("{}_{}{}", hw_stage, "samp", samplers.size()));
         samplers.push_back(id);
         interfaces.push_back(id);
