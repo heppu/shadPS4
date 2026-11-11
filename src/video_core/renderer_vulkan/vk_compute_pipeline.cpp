@@ -32,7 +32,6 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     };
 
     u32 binding{};
-    u32 num_array_descriptors{};
     boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
     for (const auto& buffer : info->buffers) {
         // During deserialization, we don't have access to the UD to fetch sharp data. To address
@@ -59,14 +58,15 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         binding += num_bindings;
     }
     for (const auto& sampler : info->samplers) {
-        const u32 num_descriptors = sampler.NumDescriptors();
+        if (sampler.IsTable()) {
+            continue;
+        }
         bindings.push_back({
             .binding = binding++,
             .descriptorType = vk::DescriptorType::eSampler,
-            .descriptorCount = num_descriptors,
+            .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute,
         });
-        num_array_descriptors += num_descriptors - 1;
     }
 
     const vk::PushConstantRange push_constants = {
@@ -75,7 +75,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .size = sizeof(Shader::PushData),
     };
 
-    uses_push_descriptors = binding + num_array_descriptors < instance.MaxPushDescriptors();
+    uses_push_descriptors = binding < instance.MaxPushDescriptors();
     const auto flags = uses_push_descriptors
                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
                            : vk::DescriptorSetLayoutCreateFlagBits{};
@@ -92,17 +92,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                vk::to_string(descriptor_set_result));
     desc_layout = std::move(descriptor_set);
 
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
-    const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
-        .pushConstantRangeCount = 1U,
-        .pPushConstantRanges = &push_constants,
-    };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create compute pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
+    CreatePipelineLayout(push_constants);
     SetObjectName(device, *pipeline_layout, "Compute PipelineLayout {}", debug_str);
 
     const vk::ComputePipelineCreateInfo compute_pipeline_ci = {

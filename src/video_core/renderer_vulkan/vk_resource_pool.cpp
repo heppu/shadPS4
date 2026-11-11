@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 
@@ -111,6 +112,9 @@ DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semapho
 }
 
 DescriptorHeap::~DescriptorHeap() {
+    for (const auto pool : table_pools) {
+        device.destroyDescriptorPool(pool);
+    }
     device.destroyDescriptorPool(curr_pool);
     for (const auto [pool, tick] : pending_pools) {
         work_semaphore->Wait(tick);
@@ -176,6 +180,77 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     desc_sets.pop_back();
     descriptor_sets[set_key] = std::move(desc_sets);
     return desc_set;
+}
+
+DescriptorHeap::TableSets& DescriptorHeap::GetTableSets(vk::DescriptorType type, u32 count) {
+    const auto it = std::ranges::find_if(table_sets, [&](const TableSets& sets) {
+        return sets.type == type && sets.count == count;
+    });
+    if (it != table_sets.end()) {
+        return *it;
+    }
+    const vk::DescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorType = type,
+        .descriptorCount = count,
+        .stageFlags = vk::ShaderStageFlagBits::eAll,
+    };
+    const vk::DescriptorSetLayoutCreateInfo layout_ci = {
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+    auto [layout_result, layout] = device.createDescriptorSetLayoutUnique(layout_ci);
+    ASSERT_MSG(layout_result == vk::Result::eSuccess,
+               "Failed to create table descriptor set layout: {}", vk::to_string(layout_result));
+    return table_sets.emplace_back(type, count, std::move(layout));
+}
+
+vk::DescriptorSetLayout DescriptorHeap::TableLayout(vk::DescriptorType type, u32 count) {
+    return *GetTableSets(type, count).layout;
+}
+
+vk::DescriptorSet DescriptorHeap::AllocateTable(vk::DescriptorType type, u32 count) {
+    auto& sets = GetTableSets(type, count);
+    if (!sets.free_sets.empty()) {
+        const auto set = sets.free_sets.back();
+        sets.free_sets.pop_back();
+        return set;
+    }
+    const vk::DescriptorSetLayout layout = *sets.layout;
+    vk::DescriptorSetAllocateInfo alloc_info = {
+        .descriptorSetCount = 1,
+        .pSetLayouts = &layout,
+    };
+    vk::DescriptorSet set;
+    if (!table_pools.empty()) {
+        alloc_info.descriptorPool = table_pools.back();
+        if (device.allocateDescriptorSets(&alloc_info, &set) == vk::Result::eSuccess) {
+            return set;
+        }
+    }
+    static constexpr u32 TablePoolSets = 16;
+    const vk::DescriptorPoolSize pool_size = {
+        .type = type,
+        .descriptorCount = count * TablePoolSets,
+    };
+    const vk::DescriptorPoolCreateInfo pool_info = {
+        .maxSets = TablePoolSets,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+    };
+    auto [pool_result, pool] = device.createDescriptorPool(pool_info);
+    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create table descriptor pool: {}",
+               vk::to_string(pool_result));
+    table_pools.push_back(pool);
+    alloc_info.descriptorPool = pool;
+    const auto result = device.allocateDescriptorSets(&alloc_info, &set);
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to allocate table descriptor set: {}",
+               vk::to_string(result));
+    return set;
+}
+
+void DescriptorHeap::FreeTable(vk::DescriptorType type, u32 count, vk::DescriptorSet set) {
+    GetTableSets(type, count).free_sets.push_back(set);
 }
 
 void DescriptorHeap::CreateDescriptorPool() {
