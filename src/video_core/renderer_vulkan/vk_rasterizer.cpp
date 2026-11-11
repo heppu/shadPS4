@@ -439,6 +439,20 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     buffer_infos.clear();
     image_infos.clear();
 
+    size_t num_image_infos{};
+    for (const auto* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        for (const auto& image : stage->images) {
+            num_image_infos += image.NumBindings(*stage);
+        }
+        for (const auto& sampler : stage->samplers) {
+            num_image_infos += sampler.NumDescriptors();
+        }
+    }
+    image_infos.reserve(num_image_infos);
+
     bool uses_dma = false;
 
     // Bind resource buffers and textures.
@@ -1033,8 +1047,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         binding.unified += array_size;
     }
 
-    for (const auto& sampler : stage.samplers) {
-        auto ssharp = sampler.GetSharp(stage);
+    const auto bind_sampler = [&](const Shader::SamplerResource& sampler, AmdGpu::Sampler ssharp) {
         if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
                                 liverpool->regs.ta_bc_base.Address() == 0)) {
             LOG_WARNING(Render_Vulkan,
@@ -1050,13 +1063,28 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         const auto vk_sampler =
             texture_cache.GetSampler(ssharp, liverpool->regs.ta_bc_base, sampler.is_depth);
         image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+    };
+
+    for (const auto& sampler : stage.samplers) {
+        const size_t first_sampler_idx = image_infos.size();
+        if (sampler.table_size != 0) {
+            auto table = sampler.GetTableSharp(stage);
+            if (!memory->IsValidMapping(table.base_address, table.GetSize())) {
+                table = AmdGpu::Buffer::Null();
+            }
+            for (u32 i = 0; i < sampler.table_size; ++i) {
+                bind_sampler(sampler, sampler.GetTableEntry(table, i, stage));
+            }
+        } else {
+            bind_sampler(sampler, sampler.GetSharp(stage));
+        }
         auto& set_write = set_writes[set_write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified++;
         set_write.dstArrayElement = 0;
-        set_write.descriptorCount = 1;
+        set_write.descriptorCount = sampler.NumDescriptors();
         set_write.descriptorType = vk::DescriptorType::eSampler;
-        set_write.pImageInfo = &image_infos.back();
+        set_write.pImageInfo = &image_infos[first_sampler_idx];
     }
 }
 

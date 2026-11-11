@@ -126,7 +126,11 @@ public:
 
     u32 Add(const SamplerResource& desc) {
         const u32 index{Add(sampler_resources, desc, [this, &desc](const auto& existing) {
-            return desc.sharp_fetch == existing.sharp_fetch && desc.post_op == existing.post_op &&
+            return desc.sharp_fetch == existing.sharp_fetch &&
+                   desc.table_fetch == existing.table_fetch &&
+                   desc.table_stride_dw == existing.table_stride_dw &&
+                   desc.table_offset_dw == existing.table_offset_dw &&
+                   desc.table_size == existing.table_size && desc.post_op == existing.post_op &&
                    desc.post_op_tsharp_dw3_off == existing.post_op_tsharp_dw3_off &&
                    desc.is_depth == existing.is_depth;
         })};
@@ -323,6 +327,23 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
 
     if (inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
+        if (const auto& sampler_table = resource.tables[1]; !sampler_table.index.IsEmpty()) {
+            SamplerResource table_res = {
+                .table_fetch = ConstructSharpFetch<AmdGpu::Buffer>(sampler_table.sharp),
+                .table_stride_dw = sampler_table.stride_dw,
+                .table_offset_dw = sampler_table.offset_dw,
+                .post_op = resource.sharps[1].post_op,
+                .is_depth = bool(inst_info.is_depth),
+            };
+            table_res.table_size = table_res.NumTableEntries(info);
+            if (table_res.table_size != 0) {
+                const u32 sampler_binding = descriptors.Add(table_res);
+                const IR::U32 binding = ir.Imm32(image_binding | sampler_binding << 16);
+                inst.SetArg(
+                    0, ir.IndexedImageHandle(binding, ir.Imm32(0U), IR::U32{sampler_table.index}));
+                return;
+            }
+        }
         auto& lod_prod = resource.sharps[1].post_op_data.lod_prod;
         const u32 sampler_binding = descriptors.Add(SamplerResource{
             .sharp_fetch = ConstructSharpFetch<AmdGpu::Sampler>(resource.sharps[1]),
@@ -647,10 +668,14 @@ void PatchBufferArgs(IR::Inst& inst, Info& info) {
                 CalculateBufferAddress(ir, inst, info, buffer, buffer.stride));
 }
 
+static u32 ImageHandleBinding(const IR::Value& handle) {
+    return handle.IsImmediate() ? handle.U32() : handle.Inst()->Arg(0).U32();
+}
+
 void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image_res,
                           const AmdGpu::Image& image) {
     const auto handle = inst.Arg(0);
-    const auto& sampler_res = info.samplers[(handle.U32() >> 16) & 0xFFFF];
+    const auto& sampler_res = info.samplers[(ImageHandleBinding(handle) >> 16) & 0xFFFF];
     const auto sampler = sampler_res.GetSharp(info);
 
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
@@ -846,7 +871,7 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
     }
 
     const auto image_handle = inst.Arg(0);
-    const auto binding_index = image_handle.U32() & 0xFFFF;
+    const auto binding_index = ImageHandleBinding(image_handle) & 0xFFFF;
     const auto& image_res = info.images[binding_index];
     auto image = image_res.GetSharp(info);
 
