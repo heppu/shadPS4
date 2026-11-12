@@ -100,6 +100,26 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
              total_flexible_size, total_direct_size);
 }
 
+bool MemoryManager::SampleDirect(VAddr virtual_addr, u64 size, std::span<u8> dest, u64 count) {
+    const u64 sample_size = dest.size() / count;
+    std::shared_lock lk{mutex, std::try_to_lock};
+    if (!lk.owns_lock() || count < 2 || size < sample_size || !IsValidMapping(virtual_addr) ||
+        !IsValidMapping(virtual_addr + size - 1)) {
+        return false;
+    }
+    for (u64 i = 0; i < count; ++i) {
+        const VAddr address = virtual_addr + (size - sample_size) * i / (count - 1);
+        const auto& vma = FindVMA(address)->second;
+        if (vma.type != VMAType::Direct || !vma.Contains(address, sample_size) ||
+            False(vma.prot & MemoryProt::CpuRead)) {
+            return false;
+        }
+        std::memcpy(dest.data() + i * sample_size, reinterpret_cast<const void*>(address),
+                    sample_size);
+    }
+    return true;
+}
+
 u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
     static constexpr u64 MinSizeToClamp = 1_GB;
     // Dont bother with clamping if the size is small so we dont pay a map lookup on every buffer.
