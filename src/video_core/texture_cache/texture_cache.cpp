@@ -256,6 +256,19 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     SmallVector<ImageId, 16> deleted_images;
     ForEachImageInRegion(cpu_addr, size, [&](ImageId id, Image&) { deleted_images.push_back(id); });
     for (const ImageId id : deleted_images) {
+        Image& image = slot_images[id];
+        const bool is_plain_texture = image.usage.texture && !image.usage.storage &&
+                                      !image.usage.render_target && !image.usage.depth_target &&
+                                      False(image.flags & ImageFlagBits::GpuModified);
+        if (is_plain_texture) {
+            // Guests that alias direct memory remap pages under live textures. Keep the image
+            // and read it again once the range is mapped.
+            std::scoped_lock image_lk{image.mutex};
+            image.flags |= ImageFlagBits::CpuDirty;
+            UntrackImage(id);
+            unmapped_images.push_back({id, image.image_uid, gc_tick});
+            continue;
+        }
         // TODO: Download image data back to host.
         FreeImage(id);
     }
@@ -861,8 +874,17 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
     stencil_image.AssociateDepth(depth_id, slot_images[depth_id].image_uid);
 }
 
+bool TextureCache::IsBacked(const Image& image) const {
+    return Core::Memory::Instance()->IsValidMapping(image.info.guest_address,
+                                                    image.info.guest_size);
+}
+
 void TextureCache::RefreshImage(Image& image) {
     if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
+        return;
+    }
+
+    if (!IsBacked(image)) {
         return;
     }
 
@@ -1244,7 +1266,33 @@ void TextureCache::GarbageCollectSamplers() {
     }
 }
 
+void TextureCache::FreeUnbackedImages() {
+    static constexpr u64 RemapGraceTicks = 30;
+    std::scoped_lock lk{registry_mutex};
+    while (!unmapped_images.empty() && unmapped_images.front().tick + RemapGraceTicks < gc_tick) {
+        const auto [image_id, image_uid, tick] = unmapped_images.front();
+        unmapped_images.pop_front();
+        if (!slot_images.IsAllocated(image_id)) {
+            continue;
+        }
+        Image& image = slot_images[image_id];
+        if (image.image_uid != image_uid || False(image.flags & ImageFlagBits::Registered)) {
+            continue;
+        }
+        if (image.gc_tick_touched + RemapGraceTicks >= gc_tick) {
+            // Still referenced through another mapping of its backing memory.
+            unmapped_images.push_back({image_id, image_uid, gc_tick});
+            continue;
+        }
+        // Still dirty means nothing has read the image since its range was unmapped.
+        if (True(image.flags & ImageFlagBits::CpuDirty)) {
+            FreeImage(image_id);
+        }
+    }
+}
+
 void TextureCache::RunGarbageCollector() {
+    FreeUnbackedImages();
     GarbageCollectImages();
     GarbageCollectSamplers();
     ++gc_tick;
@@ -1252,6 +1300,7 @@ void TextureCache::RunGarbageCollector() {
 
 void TextureCache::TouchImage(Image& image) {
     std::scoped_lock lk{registry_mutex};
+    image.gc_tick_touched = gc_tick;
     image_lru_cache.Touch(image, gc_tick);
 }
 
