@@ -145,6 +145,7 @@ struct ImageResource {
     u32 table_stride_dw{};
     u32 table_offset_dw{};
     u32 table_size{};
+    AmdGpu::ImageType table_type{AmdGpu::ImageType::Color2D};
     bool is_depth{};
     bool is_atomic{};
     bool is_array{};
@@ -183,7 +184,12 @@ struct ImageResource {
 
     constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
         AmdGpu::Image image{};
-        if (IsTable() || !Fetch(info.flattened_ud_buf.data(), &image)) {
+        if (IsTable()) {
+            image = AmdGpu::Image::Null(is_depth);
+            image.type = u64(table_type);
+            return image;
+        }
+        if (!Fetch(info.flattened_ud_buf.data(), &image)) {
             return AmdGpu::Image::Null(is_depth);
         }
         if (post_op == SharpFetchPostOp::ConvertCubeTo2DArray) {
