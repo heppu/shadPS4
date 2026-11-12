@@ -1271,7 +1271,7 @@ void TextureCache::GarbageCollectSamplers() {
 }
 
 void TextureCache::FreeUnbackedImages() {
-    static constexpr u64 RemapGraceTicks = 30;
+    static constexpr u64 RemapGraceTicks = 2;
     std::scoped_lock lk{registry_mutex};
     while (!unmapped_images.empty() && unmapped_images.front().tick + RemapGraceTicks < gc_tick) {
         const auto [image_id, image_uid, tick] = unmapped_images.front();
