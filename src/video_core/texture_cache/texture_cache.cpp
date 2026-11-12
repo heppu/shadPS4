@@ -578,7 +578,11 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
                     TrackImage(merged_image_id);
                 }
                 auto& merged_image = slot_images[merged_image_id];
-                runtime.CopyMip(&cache_image, &merged_image, mip, slice);
+                auto& subresource = slot_images[cache_image_id];
+                // Only GPU written data is missing from the guest memory the merged image reads.
+                if (True(subresource.flags & ImageFlagBits::GpuModified)) {
+                    runtime.CopyMip(&subresource, &merged_image, mip, slice);
+                }
                 FreeImage(cache_image_id);
             }
         }
