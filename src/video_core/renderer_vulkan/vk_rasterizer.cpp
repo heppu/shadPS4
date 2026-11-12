@@ -1081,6 +1081,23 @@ u64 Rasterizer::TableEpoch() const {
     return liverpool->FlipCount() + texture_cache.GcTick();
 }
 
+void Rasterizer::DropRemappedTableKeys() {
+    if (table_remapped_ranges.empty()) {
+        return;
+    }
+    // A key cached for a descriptor is only good while its memory stays mapped as it was.
+    std::ranges::sort(table_remapped_ranges);
+    std::erase_if(table_keys, [&](const auto& entry) {
+        const auto& cached = entry.second;
+        const auto it = std::ranges::upper_bound(table_remapped_ranges, cached.end, {},
+                                                 &std::pair<VAddr, VAddr>::first);
+        return std::ranges::any_of(table_remapped_ranges.begin(), it, [&](const auto& range) {
+            return range.second > cached.begin && range.first < cached.end;
+        });
+    });
+    table_remapped_ranges.clear();
+}
+
 u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) {
     if (!tsharp.Valid() || tsharp.Address() == 0) {
         return 0;
@@ -1108,7 +1125,7 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
     // the content names the texture when it can be read.
     // Sampling memory for every entry on every frame is slow, so a descriptor keeps its key
     // for a while. Content that changes in place is caught by the periodic verification.
-    static constexpr u64 KeyLifetime = 32;
+    static constexpr u64 KeyLifetime = 256;
     static constexpr size_t MaxCachedKeys = 32768;
     const u64 epoch = TableEpoch();
     const u64 descriptor = XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(table_type));
@@ -1126,7 +1143,11 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
     if (table_keys.size() >= MaxCachedKeys) {
         table_keys.clear();
     }
-    table_keys.insert_or_assign(descriptor, TableKey{key, epoch});
+    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
+    table_keys.insert_or_assign(descriptor,
+                                TableKey{key, epoch, desc.info.guest_address,
+                                         desc.info.guest_address + desc.info.guest_size});
     return key;
 }
 
@@ -1171,7 +1192,7 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
     return XXH3_64bits(table_verify_data.data(), table_verify_data.size()) | 1;
 }
 
-vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
+vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& key,
                                             const Shader::ImageResource* image_desc,
                                             bool& is_pending) {
     static constexpr u32 MaxResolvesPerTick = 48;
@@ -1203,8 +1224,22 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
             entry.verify_interval =
                 is_changed ? 1 : std::min(entry.verify_interval * 2, MaxVerifyInterval);
             entry.verify_tick = gc_tick + entry.verify_interval;
-            if (is_changed) {
+            if (is_changed && image_desc) {
+                // The key was cached for this descriptor and no longer names what is in memory.
+                // Look the content up again instead of touching an image other entries share.
+                entry.verify_interval = MaxVerifyInterval;
+                entry.verify_tick = gc_tick + MaxVerifyInterval;
+                table_keys.erase(
+                    XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(image_desc->table_type)));
+                const u64 fresh_key = TableImageKey(tsharp, image_desc->table_type);
+                if (fresh_key != key) {
+                    key = fresh_key;
+                    return ResolveTableImage(tsharp, key, image_desc, is_pending);
+                }
+                // Same key, so the image itself is out of date.
                 entry.full_hash = full_hash;
+                entry.verify_interval = 1;
+                entry.verify_tick = gc_tick + 1;
                 if (address == entry.resolved_address) {
                     texture_cache.InvalidateImage(entry.image_id);
                     entry.synced_tick = 0;
@@ -1272,6 +1307,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
                     other != table_images.end() &&
                     other->second.resolved_address == entry.resolved_address) {
                     table_images.erase(other);
+                    ++table_steals;
                 }
                 owner->second = key;
             }
@@ -1335,31 +1371,41 @@ u32 Rasterizer::AcquireImageTableSet(u32 num_entries) {
 }
 
 void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc) {
+    DropRemappedTableKeys();
     const u64 generation = texture_cache.ImageGeneration();
     {
+        // Reading an image again for one entry changes what earlier entries of this pass
+        // show through it, so go over the table once more when that happened.
+        static constexpr u32 MaxPasses = 3;
         auto& table = image_tables[table_index];
-        table.has_unresolved = false;
-        image_table_keys.assign(table.num_entries, 0);
-        image_table_views.assign(table.num_entries, vk::ImageView{});
-        for (u32 i = 0; i < table.num_entries; ++i) {
-            AmdGpu::Image tsharp;
-            std::memcpy(&tsharp,
-                        table.shadow.data() +
-                            (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
-                        sizeof(tsharp));
-            // The fractional minimum LOD fades streamed mips in and changes every frame.
-            tsharp.min_lod &= ~u64{0xFF};
-            tsharp.min_lod_warn = 0;
-            tsharp.counter_bank_id = 0;
-            tsharp.lod_hw_cnt_en = 0;
-            const u64 key = TableImageKey(tsharp, table.type);
-            if (key == 0) {
-                continue;
+        for (u32 pass = 0; pass < MaxPasses; ++pass) {
+            table_steals = 0;
+            table.has_unresolved = false;
+            image_table_keys.assign(table.num_entries, 0);
+            image_table_views.assign(table.num_entries, vk::ImageView{});
+            for (u32 i = 0; i < table.num_entries; ++i) {
+                AmdGpu::Image tsharp;
+                std::memcpy(&tsharp,
+                            table.shadow.data() +
+                                (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
+                            sizeof(tsharp));
+                // The fractional minimum LOD fades streamed mips in and changes every frame.
+                tsharp.min_lod &= ~u64{0xFF};
+                tsharp.min_lod_warn = 0;
+                tsharp.counter_bank_id = 0;
+                tsharp.lod_hw_cnt_en = 0;
+                u64 key = TableImageKey(tsharp, table.type);
+                if (key == 0) {
+                    continue;
+                }
+                const auto view = ResolveTableImage(tsharp, key, image_desc, table.has_unresolved);
+                if (view) {
+                    image_table_keys[i] = key;
+                    image_table_views[i] = view;
+                }
             }
-            const auto view = ResolveTableImage(tsharp, key, image_desc, table.has_unresolved);
-            if (view) {
-                image_table_keys[i] = key;
-                image_table_views[i] = view;
+            if (table_steals == 0) {
+                break;
             }
         }
     }
@@ -1890,7 +1936,10 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
-    liverpool->SendCommand([this, addr, size] { buffer_cache.ReleaseResident(addr, size); });
+    liverpool->SendCommand([this, addr, size] {
+        buffer_cache.ReleaseResident(addr, size);
+        table_remapped_ranges.emplace_back(addr, addr + size);
+    });
     {
         std::scoped_lock lock{mapped_ranges_mutex};
         mapped_ranges -= decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
