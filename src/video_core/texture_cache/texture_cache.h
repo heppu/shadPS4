@@ -178,6 +178,13 @@ public:
         RefreshImage(image);
     }
 
+    /// Makes the next update read the image from guest memory again.
+    void InvalidateImage(ImageId image_id) {
+        Image& image = slot_images[image_id];
+        std::scoped_lock lk{image.mutex};
+        image.flags |= ImageFlagBits::CpuDirty;
+    }
+
     /// Marks the image as in use without reading guest memory.
     void KeepAlive(ImageId image_id) {
         TouchImage(slot_images[image_id]);
