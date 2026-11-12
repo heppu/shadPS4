@@ -398,6 +398,8 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             table_res.table_offset_dw = sampler_table.offset_dw;
             table_res.table_size = table_res.NumTableEntries(info);
             if (table_res.IsTable()) {
+                // Reads past the table return zeros on hardware, the last slot stands for them.
+                ++table_res.table_size;
                 sampler_res = table_res;
                 sampler_index = sampler_table.index;
             }
