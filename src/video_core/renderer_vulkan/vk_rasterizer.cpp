@@ -1076,7 +1076,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
     }
 }
 
-u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp) const {
+u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) const {
     if (!tsharp.Valid() || tsharp.Address() == 0) {
         return 0;
     }
@@ -1086,15 +1086,44 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp) const {
         data_fmt == AmdGpu::DataFormat::FormatInvalid || AmdGpu::IsFmask(data_fmt)) {
         return 0;
     }
-    // Table images are declared as one float-sampled 2D type. Formats that may alias a depth
-    // buffer are left out because GPU-written surfaces need per-draw handling.
-    if (tsharp.GetType() != AmdGpu::ImageType::Color2D || AmdGpu::IsInteger(num_fmt) ||
+    // Table images are declared as one float-sampled type per table. Formats that may alias a
+    // depth buffer are left out because GPU-written surfaces need per-draw handling.
+    const auto type = tsharp.GetType();
+    const bool is_type_match =
+        table_type == AmdGpu::ImageType::Color2D
+            ? type == AmdGpu::ImageType::Color2D
+            : type == AmdGpu::ImageType::Cube || type == AmdGpu::ImageType::Color2DArray;
+    if (!is_type_match || AmdGpu::IsInteger(num_fmt) ||
         tsharp.GetNumberConversion() != AmdGpu::NumberConversion::None ||
         data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32 ||
         !memory->IsValidGpuMapping(tsharp.Address(), 0)) {
         return 0;
     }
-    return XXH3_64bits(&tsharp, sizeof(tsharp)) | 1;
+    // Guests that defragment streamed textures move them between addresses all the time, so
+    // the content names the texture when it can be read.
+    AmdGpu::Image identity = tsharp;
+    u64 seed = u64(table_type);
+    if (const u64 content = TableImageContentHash(tsharp); content != 0) {
+        identity.base_address = 0;
+        seed ^= content;
+    }
+    return XXH3_64bits_withSeed(&identity, sizeof(identity), seed) | 1;
+}
+
+u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp) const {
+    static constexpr u64 SampleSize = 64;
+    static constexpr u64 NumSamples = 64;
+    const u64 num_bits = AmdGpu::NumBitsPerBlock(tsharp.GetDataFmt());
+    const u64 width = tsharp.width + 1;
+    const u64 height = tsharp.height + 1;
+    const u64 num_texels = AmdGpu::IsBlockCoded(tsharp.GetDataFmt())
+                               ? ((width + 3) / 4) * ((height + 3) / 4)
+                               : width * height;
+    std::array<u8, SampleSize * NumSamples> samples;
+    if (!memory->SampleDirect(tsharp.Address(), num_texels * num_bits / 8, samples, NumSamples)) {
+        return 0;
+    }
+    return XXH3_64bits(samples.data(), samples.size()) | 1;
 }
 
 vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
@@ -1111,11 +1140,16 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
         if (!entry.view) {
             return {};
         }
+        const VAddr address = tsharp.Address();
         auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
         if (image && !is_target(*image)) {
             if (image_desc && entry.synced_tick != gc_tick) {
                 entry.synced_tick = gc_tick;
-                texture_cache.UpdateImage(entry.image_id);
+                if (address == entry.resolved_address) {
+                    texture_cache.UpdateImage(entry.image_id);
+                } else {
+                    texture_cache.KeepAlive(entry.image_id);
+                }
                 needs_barrier |= runtime.Transit(image, vk::ImageLayout::eShaderReadOnlyOptimal,
                                                  vk::PipelineStageFlagBits2::eAllCommands,
                                                  vk::AccessFlagBits2::eShaderRead);
@@ -1134,7 +1168,11 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
     }
     ++table_resolves;
 
-    TableImage entry{.used_tick = gc_tick, .synced_tick = gc_tick};
+    TableImage entry{
+        .used_tick = gc_tick,
+        .synced_tick = gc_tick,
+        .resolved_address = tsharp.Address(),
+    };
     bool aliases_target = false;
     texture_cache.ForEachImageInRegion(
         tsharp.Address(), 1,
@@ -1149,6 +1187,17 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
             entry.view = *texture_cache.FindTexture(image_id, desc).image_view;
             entry.image_id = image_id;
             entry.image_uid = image.image_uid;
+            // The same address resolved under another key means the image was read again and
+            // now holds that key's content.
+            if (const auto [owner, is_new] = table_image_owners.try_emplace(image_id.index, key);
+                !is_new && owner->second != key) {
+                if (const auto other = table_images.find(owner->second);
+                    other != table_images.end() &&
+                    other->second.resolved_address == entry.resolved_address) {
+                    table_images.erase(other);
+                }
+                owner->second = key;
+            }
             image.usage.texture = true;
             needs_barrier |= runtime.Transit(&image, vk::ImageLayout::eShaderReadOnlyOptimal,
                                              vk::PipelineStageFlagBits2::eAllCommands,
@@ -1221,7 +1270,12 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                         table.shadow.data() +
                             (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
                         sizeof(tsharp));
-            const u64 key = TableImageKey(tsharp);
+            // The fractional minimum LOD fades streamed mips in and changes every frame.
+            tsharp.min_lod &= ~u64{0xFF};
+            tsharp.min_lod_warn = 0;
+            tsharp.counter_bank_id = 0;
+            tsharp.lod_hw_cnt_en = 0;
+            const u64 key = TableImageKey(tsharp, table.type);
             if (key == 0) {
                 continue;
             }
@@ -1282,7 +1336,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         return table.address == address && table.bytes == bytes &&
                table.stride_dw == image_desc.table_stride_dw &&
                table.offset_dw == image_desc.table_offset_dw &&
-               table.num_entries == image_desc.table_size;
+               table.num_entries == image_desc.table_size && table.type == image_desc.table_type;
     });
     if (it == image_tables.end()) {
         it = image_tables.insert(image_tables.end(), ImageTable{});
@@ -1291,6 +1345,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->stride_dw = image_desc.table_stride_dw;
         it->offset_dw = image_desc.table_offset_dw;
         it->num_entries = image_desc.table_size;
+        it->type = image_desc.table_type;
         const u64 shadow_size =
             (u64{it->num_entries} * it->stride_dw + it->offset_dw) * sizeof(u32) +
             sizeof(AmdGpu::Image);

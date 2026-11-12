@@ -127,7 +127,8 @@ private:
                              const Shader::Info& stage);
     vk::DescriptorSet GetSamplerTableSet(const Shader::SamplerResource& sampler,
                                          const Shader::Info& stage);
-    u64 TableImageKey(const AmdGpu::Image& tsharp) const;
+    u64 TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) const;
+    u64 TableImageContentHash(const AmdGpu::Image& tsharp) const;
     vk::ImageView ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
                                     const Shader::ImageResource* image_desc, bool& is_pending);
     u32 AcquireImageTableSet(u32 num_entries);
@@ -207,6 +208,7 @@ private:
         vk::ImageView view{};
         u64 used_tick{};
         u64 synced_tick{};
+        VAddr resolved_address{};
     };
     /// One immutable version of a table's descriptors.
     struct ImageTableSet {
@@ -224,6 +226,7 @@ private:
         u32 stride_dw{};
         u32 offset_dw{};
         u32 num_entries{};
+        AmdGpu::ImageType type{};
         std::vector<u8> shadow;
         u64 checked_tick{};
         s32 current_set{-1};
@@ -234,6 +237,7 @@ private:
         u32 slot;
     };
     std::unordered_map<u64, TableImage> table_images;
+    std::unordered_map<u32, u64> table_image_owners;
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
