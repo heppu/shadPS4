@@ -32,6 +32,15 @@ def main():
             if d.resource in texs or (int(x.type) == 4 and x.arrayElement > 0):
                 images.append((x.index, x.arrayElement, d))
         p("table bytes", len(table) if table else None)
+        for x in ctl.GetDescriptorAccess():
+            if x.stage == rd.ShaderStage.Pixel and int(x.type) == 2:
+                rng = rd.DescriptorRange(); rng.offset = x.byteOffset; rng.descriptorSize = x.byteSize; rng.count = 1; rng.type = x.type
+                sd = ctl.GetSamplerDescriptors(x.descriptorStore, [rng])[0]
+                p("sampler elem", x.arrayElement, "minlod", sd.minLOD, "maxlod", sd.maxLOD, "bias", sd.mipBias, "filter", str(sd.filter.minify), str(sd.filter.magnify), str(sd.filter.mip),
+                  "addr", str(sd.addressU), str(sd.addressV), "border", [round(c, 2) for c in sd.borderColorValue.floatValue], "aniso", sd.maxAnisotropy, "cmp", str(sd.compareFunction))
+        st = ctl.GetPipelineState()
+        refl = st.GetShaderReflection(rd.ShaderStage.Pixel)
+        open(os.path.join(OUT, "slot_ps_e%d.spv" % eid), "wb").write(bytes(refl.rawBytes))
         for idx, elem, d in images:
             t = texs.get(d.resource)
             line = ["img idx", idx, "elem", elem]
