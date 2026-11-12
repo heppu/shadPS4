@@ -11,6 +11,8 @@ Paths inside the scripts point at the machine they were written on (`/mnt/games/
 - `bo4-dev/guard`: watchdog started by every run script. It kills the emulator when GPU memory or free RAM crosses a limit.
 - `bo4-dev/shot`, `key`, `step`, `zmplay.sh`, `zmslow.sh`: screenshots, key injection, scripted route into a Zombies match.
 - `bo4-dev/hang`, `bprun`, `peekrun`, `gdb*`, `bp.py`, `peek.py`, `guest.py`, `watch.py`: gdb helpers for guest registers, host and guest breakpoints, memory dumps and runtime byte patches.
+- `bo4-dev/zmcap.sh`, `rdrun`, `rd/*.py`, `patches/rdoc-trigger.diff`: RenderDoc frame capture of a match on X11 (the capture layer refuses Wayland) and headless replay scripts that list passes, bound textures, descriptor accesses and resource usage. The diff adds a timed capture trigger (`RDOC_AT` seconds) to the emulator and is applied only for capture builds. Replay runs without network and with RenderDoc analytics off.
+- `bo4-dev/peekgrid.py`: example `PEEKPY` script for `peekrun`.
 - `bo4-dev/xr.py`, `xref.py`, `dis`: cross references and disassembly over a dumped eboot image.
 - `bo4-dev/patches`: emulator patch file that opens the offline mode cards when the downloaded playlist data is missing. Copy it to `user/patches/local` in the emulator user folder.
 

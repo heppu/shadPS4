@@ -3,6 +3,9 @@
 VRAM_MAX=${VRAM_MAX:-12000}; GTT_MAX=${GTT_MAX:-4000}; RAM_MIN=${RAM_MIN:-10000}
 D=$(for d in /sys/class/drm/card*/device; do [ -r $d/mem_info_vram_total ] && echo "$(cat $d/mem_info_vram_total) $d"; done | sort -n | tail -1 | cut -d' ' -f2)
 LOG=$(dirname "$0")/out/guard.log
+PIDF=$(dirname "$0")/out/guard.pid
+[ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null
+echo $$ > "$PIDF"
 while :; do
   docker ps --format '{{.Names}}' | /bin/busybox grep -q -E '^shad-(run|play)$' || { sleep 1; S=$((S+1)); [ ${S:-0} -gt 30 ] && exit 0; continue; }
   S=0
