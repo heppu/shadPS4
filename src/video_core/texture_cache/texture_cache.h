@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -170,9 +171,23 @@ public:
     void UpdateImage(ImageId image_id) {
         Image& image = slot_images[image_id];
         TouchImage(image);
+        if (True(image.flags & ImageFlagBits::CpuDirty) && !IsBacked(image)) {
+            return;
+        }
         TrackImage(image_id);
         RefreshImage(image);
     }
+
+    /// Marks the image as in use without reading guest memory.
+    void KeepAlive(ImageId image_id) {
+        TouchImage(slot_images[image_id]);
+    }
+
+    /// Returns true when the whole guest range of the image is mapped.
+    [[nodiscard]] bool IsBacked(const Image& image) const;
+
+    /// Frees images kept across an unmap that nothing has used since.
+    void FreeUnbackedImages();
 
     /// Resolves overlap between existing cache image and pending merged image
     [[nodiscard]] std::tuple<ImageId, int, int> ResolveOverlap(const ImageInfo& info,
@@ -471,6 +486,12 @@ private:
     u64 pressure_gc_samplers = 0;
     u64 critical_gc_samplers = 0;
     u64 gc_tick = 0;
+    struct UnmappedImage {
+        ImageId image_id;
+        u64 image_uid;
+        u64 tick;
+    };
+    std::deque<UnmappedImage> unmapped_images;
     Common::LRUCache<Image> image_lru_cache;
     Common::LRUCache<Sampler> sampler_lru_cache;
     const bool readback_linear_images;
