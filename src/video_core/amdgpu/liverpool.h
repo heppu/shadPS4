@@ -127,6 +127,11 @@ public:
         gfx_queue.dcb_buffer.reserve(GfxReservedSize);
     }
 
+    /// Number of flips seen in the command stream, in order with the draws around them.
+    u64 FlipCount() const noexcept {
+        return flip_count;
+    }
+
     inline ComputeProgram& GetCsRegs() {
         return mapped_queues[curr_qid].cs_state;
     }
@@ -153,6 +158,7 @@ public:
 #endif
 
 private:
+    u64 flip_count{};
     struct Task {
         struct promise_type {
             auto get_return_object() {
