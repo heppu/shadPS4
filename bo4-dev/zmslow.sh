@@ -16,7 +16,7 @@ tozombies() {
   return 1
 }
 (sleep 240; ./shot v0; k n 60; sleep 120; ./shot v1
- tozombies > out/route.log 2>&1; ./shot v2
+ [ "$MODE" = mp ] || tozombies > out/route.log 2>&1; ./shot v2
  k n 60; sleep 120; ./shot v3
  k Right; sleep 10; ./shot v4
  k n 60; sleep 60; ./shot v5
