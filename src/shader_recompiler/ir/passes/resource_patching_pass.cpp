@@ -117,7 +117,8 @@ public:
                    desc.table_fetch == existing.table_fetch &&
                    desc.table_stride_dw == existing.table_stride_dw &&
                    desc.table_offset_dw == existing.table_offset_dw &&
-                   desc.table_size == existing.table_size && desc.is_array == existing.is_array &&
+                   desc.table_size == existing.table_size &&
+                   desc.table_type == existing.table_type && desc.is_array == existing.is_array &&
                    desc.mip_fallback_mode == existing.mip_fallback_mode &&
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
@@ -235,6 +236,39 @@ void PatchBufferSharp(const ResourceDiscovery& resource, Info& info, Descriptors
     inst.SetArg(0, ir.Imm32(buffer_binding));
 }
 
+static bool UsesCubeFaceMath(const IR::Inst& inst) {
+    static constexpr size_t MaxVisited = 512;
+    boost::container::small_vector<const IR::Inst*, 64> pending;
+    boost::container::small_vector<const IR::Inst*, 64> visited;
+    for (size_t arg = 2; arg < inst.NumArgs(); ++arg) {
+        if (const IR::Inst* source = inst.Arg(arg).TryInst()) {
+            pending.push_back(source);
+        }
+    }
+    while (!pending.empty() && visited.size() < MaxVisited) {
+        const IR::Inst* source = pending.back();
+        pending.pop_back();
+        if (std::ranges::find(visited, source) != visited.end()) {
+            continue;
+        }
+        visited.push_back(source);
+        switch (source->GetOpcode()) {
+        case IR::Opcode::CubeFaceIndex:
+        case IR::Opcode::CubeFaceCoordS:
+        case IR::Opcode::CubeFaceCoordT:
+            return true;
+        default:
+            break;
+        }
+        for (size_t arg = 0; arg < source->NumArgs(); ++arg) {
+            if (const IR::Inst* next = source->Arg(arg).TryInst()) {
+                pending.push_back(next);
+            }
+        }
+    }
+    return false;
+}
+
 void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors& descriptors,
                      const Profile& profile) {
     IR::Inst& inst = *resource.user;
@@ -262,6 +296,11 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
         table_res.table_stride_dw = image_table.stride_dw;
         table_res.table_offset_dw = image_table.offset_dw;
         table_res.table_size = table_res.NumTableEntries(info);
+        if (UsesCubeFaceMath(inst)) {
+            table_res.table_type = AmdGpu::ImageType::Cube;
+        } else if (table_res.is_array) {
+            table_res.table_type = AmdGpu::ImageType::Color2DArray;
+        }
         if (table_res.IsTable() && table_res.table_size <= profile.max_image_table_size) {
             image_res = table_res;
         }
