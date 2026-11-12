@@ -1076,7 +1076,12 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
     }
 }
 
-u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) const {
+u64 Rasterizer::TableEpoch() const {
+    // Guests rewrite their tables every frame, the collector tick alone is far too coarse.
+    return liverpool->FlipCount() + texture_cache.GcTick();
+}
+
+u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) {
     if (!tsharp.Valid() || tsharp.Address() == 0) {
         return 0;
     }
@@ -1101,29 +1106,69 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
     }
     // Guests that defragment streamed textures move them between addresses all the time, so
     // the content names the texture when it can be read.
+    // Sampling memory for every entry on every frame is slow, so a descriptor keeps its key
+    // for a while. Content that changes in place is caught by the periodic verification.
+    static constexpr u64 KeyLifetime = 32;
+    static constexpr size_t MaxCachedKeys = 32768;
+    const u64 epoch = TableEpoch();
+    const u64 descriptor = XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(table_type));
+    if (const auto it = table_keys.find(descriptor);
+        it != table_keys.end() && epoch - it->second.epoch < KeyLifetime) {
+        return it->second.key;
+    }
     AmdGpu::Image identity = tsharp;
     u64 seed = u64(table_type);
-    if (const u64 content = TableImageContentHash(tsharp); content != 0) {
+    if (const u64 content = TableImageContentHash(tsharp, table_type); content != 0) {
         identity.base_address = 0;
         seed ^= content;
     }
-    return XXH3_64bits_withSeed(&identity, sizeof(identity), seed) | 1;
+    const u64 key = XXH3_64bits_withSeed(&identity, sizeof(identity), seed) | 1;
+    if (table_keys.size() >= MaxCachedKeys) {
+        table_keys.clear();
+    }
+    table_keys.insert_or_assign(descriptor, TableKey{key, epoch});
+    return key;
 }
 
-u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp) const {
+u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp,
+                                      AmdGpu::ImageType table_type) const {
     static constexpr u64 SampleSize = 64;
     static constexpr u64 NumSamples = 64;
-    const u64 num_bits = AmdGpu::NumBitsPerBlock(tsharp.GetDataFmt());
-    const u64 width = tsharp.width + 1;
-    const u64 height = tsharp.height + 1;
-    const u64 num_texels = AmdGpu::IsBlockCoded(tsharp.GetDataFmt())
-                               ? ((width + 3) / 4) * ((height + 3) / 4)
-                               : width * height;
+    // Sample the memory the image really reads, streamed textures often lack their top mips.
+    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
     std::array<u8, SampleSize * NumSamples> samples;
-    if (!memory->SampleDirect(tsharp.Address(), num_texels * num_bits / 8, samples, NumSamples)) {
+    if (!memory->SampleDirect(desc.info.guest_address, desc.info.guest_size, samples, NumSamples)) {
+        return 0;
+    }
+    // Memory that is still blank says nothing about which texture this is.
+    const auto first = std::span{samples}.first(SampleSize);
+    bool is_blank = true;
+    for (u64 i = 1; i < NumSamples && is_blank; ++i) {
+        is_blank =
+            std::ranges::equal(first, std::span{samples}.subspan(i * SampleSize, SampleSize));
+    }
+    if (is_blank) {
         return 0;
     }
     return XXH3_64bits(samples.data(), samples.size()) | 1;
+}
+
+u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) {
+    static constexpr u64 ChunkSize = 64;
+    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
+    const u64 count = desc.info.guest_size / ChunkSize;
+    if (count < 2) {
+        return 0;
+    }
+    table_verify_data.resize(count * ChunkSize);
+    if (!memory->SampleDirect(desc.info.guest_address, desc.info.guest_size, table_verify_data,
+                              count)) {
+        return 0;
+    }
+    table_verify_bytes += table_verify_data.size();
+    return XXH3_64bits(table_verify_data.data(), table_verify_data.size()) | 1;
 }
 
 vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key,
@@ -1133,7 +1178,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
     const auto is_target = [](const VideoCore::Image& image) {
         return image.usage.render_target || image.usage.depth_target;
     };
-    const u64 gc_tick = texture_cache.GcTick();
+    const u64 gc_tick = TableEpoch();
     if (const auto it = table_images.find(key); it != table_images.end()) {
         auto& entry = it->second;
         entry.used_tick = gc_tick;
@@ -1142,6 +1187,32 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
         }
         const VAddr address = tsharp.Address();
         auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
+        // Guests that alias direct memory can fill a texture through another mapping, which
+        // neither write tracking nor the sampled key is sure to notice. Compare the whole
+        // content now and then, often while the texture is new.
+        static constexpr u32 MaxVerifyInterval = 1024;
+        static constexpr u64 MaxVerifyBytesPerTick = 2_MB;
+        if (table_verify_tick != gc_tick) {
+            table_verify_tick = gc_tick;
+            table_verify_bytes = 0;
+        }
+        if (image && image_desc && gc_tick >= entry.verify_tick &&
+            table_verify_bytes < MaxVerifyBytesPerTick) {
+            const u64 full_hash = TableImageFullHash(tsharp, image_desc->table_type);
+            const bool is_changed = full_hash != 0 && full_hash != entry.full_hash;
+            entry.verify_interval =
+                is_changed ? 1 : std::min(entry.verify_interval * 2, MaxVerifyInterval);
+            entry.verify_tick = gc_tick + entry.verify_interval;
+            if (is_changed) {
+                entry.full_hash = full_hash;
+                if (address == entry.resolved_address) {
+                    texture_cache.InvalidateImage(entry.image_id);
+                    entry.synced_tick = 0;
+                } else {
+                    image = nullptr;
+                }
+            }
+        }
         if (image && !is_target(*image)) {
             if (image_desc && entry.synced_tick != gc_tick) {
                 entry.synced_tick = gc_tick;
@@ -1172,6 +1243,9 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
         .used_tick = gc_tick,
         .synced_tick = gc_tick,
         .resolved_address = tsharp.Address(),
+        .full_hash = image_desc ? TableImageFullHash(tsharp, image_desc->table_type) : 0,
+        .verify_tick = gc_tick + 1,
+        .verify_interval = 1,
     };
     bool aliases_target = false;
     texture_cache.ForEachImageInRegion(
@@ -1183,6 +1257,9 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64 key
         auto& image = texture_cache.GetImage(image_id);
         if (!texture_cache.GetAssociatedDepth(image) && !desc.IsSubrectTexture(image.info) &&
             !is_target(image)) {
+            // A key that is new here means the content changed, possibly through another
+            // mapping of the same memory that write tracking does not see.
+            texture_cache.InvalidateImage(image_id);
             texture_cache.UpdateImage(image_id);
             entry.view = *texture_cache.FindTexture(image_id, desc).image_view;
             entry.image_id = image_id;
@@ -1326,8 +1403,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
 
 vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& image_desc,
                                                const Shader::Info& stage) {
-    static constexpr u64 EvictInterval = 256;
-    static constexpr u64 EvictAge = 1024;
+    static constexpr u64 EvictInterval = 64;
+    static constexpr u64 EvictAge = 256;
 
     const auto vsharp = image_desc.GetTableSharp(stage);
     const VAddr address = vsharp.base_address;
@@ -1353,8 +1430,11 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     }
     const u32 table_index = static_cast<u32>(std::distance(image_tables.begin(), it));
 
-    const u64 gc_tick = texture_cache.GcTick();
-    if (it->current_set < 0 || it->checked_tick != gc_tick) {
+    const u64 gc_tick = TableEpoch();
+    // Guests alternate between copies of a table, coming back to one means it was rewritten.
+    auto& last_table = last_image_tables[it->type == AmdGpu::ImageType::Color2D ? 0 : 1];
+    const bool is_switched = std::exchange(last_table, table_index) != table_index;
+    if (it->current_set < 0 || it->checked_tick != gc_tick || is_switched) {
         it->checked_tick = gc_tick;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             std::memcpy(it->shadow.data(), reinterpret_cast<const void*>(address), bytes);
