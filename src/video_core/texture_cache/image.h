@@ -181,6 +181,7 @@ public:
     u64 image_uid{};
     u64 lru_id{};
     u64 tick_accessed_last{};
+    u64 gc_tick_touched{};
     u64 cpu_hash{};
     u64 gpu_hash{};
     u64 head_hash{};
