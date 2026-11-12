@@ -5,6 +5,7 @@
 
 #include <map>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include "common/enum.h"
@@ -251,6 +252,10 @@ public:
     }
 
     u64 ClampRangeSize(VAddr virtual_addr, u64 size);
+
+    /// Copies `count` evenly spaced samples out of a range when all of it is direct memory
+    /// that stays mapped meanwhile.
+    bool SampleDirect(VAddr virtual_addr, u64 size, std::span<u8> dest, u64 count);
 
     void SetPrtArea(u32 id, VAddr address, u64 size);
 
