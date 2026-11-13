@@ -1104,3 +1104,22 @@ The 633 in-container watchdog samples peak at 9,072 MiB combined VRAM and
 RPCS3 remains running. guarded-classified-game.log contains zero renderer errors
 and critical messages (Vulkan game validation disabled); resource samples are
 in guarded-classified-memory.log.
+
+
+Dead of the Night reaches North Atrium Bridge and completes a natural game-over
+to the settled Godfrey report on the same renderer. Normal-color frames show
+reflective statues, patterned stone, red/blue emissive effects, lamps and
+localized lighting. The report suit, skin and hair remain complete and lit.
+The HUD-triggered route exercises movement, turning, fire, reload/equipment
+inputs and damage/revival. End Game could not be selected while downed, so the paused
+run is resumed and allowed to reach its report naturally. Report: 0 kills,
+500 points, round 1, 1m38s; no completed round is claimed. Gameplay samples are
+5–7 FPS and report 21 FPS. Screenshots:
+rendering-deadnight-exec-fixed-20261113.png and
+rendering-deadnight-report-exec-fixed-20261113.png.
+
+The 710 watchdog samples peak at 11,617 MiB combined VRAM and 2,219 MiB GTT,
+with at least 19,850 MiB available RAM. No threshold event occurs; RPCS3 remains
+running. guarded-deadnight-game.log has zero renderer errors and critical
+messages with game Vulkan validation disabled; samples are preserved in
+guarded-deadnight-memory.log.
