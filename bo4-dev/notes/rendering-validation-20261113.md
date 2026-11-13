@@ -609,3 +609,26 @@ raw-image-copy-fix-build.log, and raw-copy-regression-*.log under out/ship-fix.
 The original probe source is shared under hardware-tests/tests/image_raw_buffer_copy.
 No physical PS4 result is available. Normal-game validation of this fix remains
 pending at this checkpoint; the separate higher-MRT SRC1 question is unresolved.
+
+
+Normal-game follow-up on c031a913: with RenderDoc disabled and DMA enabled,
+two consecutive Classified entries and returns show detailed conference-room
+materials and ordinary fire/water reflections. The prior bright magenta/red/blue
+patch is absent from both inspected lobby returns. Screenshots:
+rendering-raw-copy-classified-20261113.png and
+rendering-raw-copy-lobby-{first,second}-20261113.png. The second entry reached
+round 1; the after-action screen reports a 20-second match. These are short
+transition checks, not full-match coverage. RPCS3 remained running throughout;
+BO4 used an advertised 8192 MiB VRAM budget. No renderer/shader Error or Critical
+entries were logged through these checks (normal-run Vulkan validation disabled).
+The local bundle out/bo4-rendering-probes.tar.gz now contains 15 original ELFs.
+
+
+Dead of the Night on c031a913 reaches North Atrium Bridge. Two inspected views
+show marble grain, carved stone, reflective metal, window glass, warm lights,
+blue light effects, and the glowing red magical seal. Firing changes ammunition
+from 8 to 7. No obvious matte-grey replacement or broken geometry appears in
+these views. Observed performance is 8–10 FPS on the shared GPU. This is short
+opening-area coverage, not a full round. Screenshot:
+rendering-dead-of-night-20261113.png; local log: out/ship-fix/raw-copy-dead-night.log.
+The Alpha Omega thumbnail remains the intentional mosaic documented above.
