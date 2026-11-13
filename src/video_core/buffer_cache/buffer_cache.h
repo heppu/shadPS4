@@ -50,9 +50,6 @@ DECLARE_ENUM_FLAG_OPERATORS(ObtainBufferFlags)
 
 class BufferCache {
     static constexpr u64 ADDRESS_SPACE_BITS = 40;
-    static constexpr u64 ARENA_PAGE_BITS = 32;
-    static constexpr u64 ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
-    static constexpr u64 NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
     static constexpr u64 RELEASED_MEMORY_SIZE = 16_MB;
     static constexpr u64 STREAM_THRESHOLD = 16_KB;
@@ -176,7 +173,16 @@ private:
     std::unique_ptr<Buffer> bda_pagetable_buffer;
     bool fault_process_pending{};
 
-    std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
+    struct ArenaRange : public Interval {
+        const Buffer* buffer;
+        constexpr bool CanMergeWith(const ArenaRange& other) const noexcept {
+            return buffer == other.buffer;
+        }
+        constexpr ArenaRange SubRange(u64 a, u64 b) const noexcept {
+            return {{a, b}, buffer};
+        }
+    };
+    IntervalList<ArenaRange> address_space;
     std::deque<Buffer> arenas;
     std::vector<ArenaBinds> pending_binds;
     Vulkan::Semaphore memory_semaphore;
@@ -215,8 +221,8 @@ private:
     u32 arena_memory_type_index{};
     u32 block_size{};
     u32 block_shift{};
-    u32 blocks_per_arena_page{};
-    u32 blocks_per_arena_page_shift{};
+    u64 max_arena_blocks{};
+    u64 preferred_arena_blocks{};
 };
 
 } // namespace VideoCore
