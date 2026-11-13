@@ -5,7 +5,8 @@ Nine direct controls read R32_FLOAT, R32_UINT, and R32_SINT textures in 2D,
 3D, and 2D-array views. Nine runtime cases read mixed numeric formats from
 an in-place rewritten descriptor table. Three further cases overwrite the
 2D images on the GPU between table reads, checking current contents without
-a CPU image readback. Each dispatch checks output guards and exact words.
+a CPU image readback. Three CPU rewrites then check cache freshness after those GPU writes.
+Each dispatch checks output guards and exact words.
 
 ```sh
 make -C tests/runtime_image_loads
@@ -22,8 +23,12 @@ shader from UINT to SINT also reports VUID-vkCmdDispatch-format-07753, because
 its specialization did not distinguish signedness. An earlier exploratory
 probe left descriptor bits uninitialized and is not baseline evidence.
 
-With typed image tables and signed specializations, all 21 expanded cases pass
+With typed image tables and signed specializations, all 24 expanded cases pass
 with no core/synchronization validation errors. The 14 emitted SPIR-V modules
 also pass spirv-val. Local evidence: load-baseline-valid.log, load-fixed2.log,
 and load-spirv-validation.log under out/ship-fix. No physical-console result is
 claimed.
+
+The cached-view follow-up retains per-draw updates and barriers and keeps depth,
+stencil aliases, and cropped views on the full resolution path. The three CPU
+rewrite cases cover the newly cached path.

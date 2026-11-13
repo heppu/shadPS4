@@ -795,3 +795,35 @@ load-fix-build2.log (BUILD_EXIT=0). Evidence: load-baseline-valid.log,
 load-fixed2.log, load-spirv-validation.log, load-regression-*.log.
 The post-load-fix BO4 check is in progress; these synthetic passes alone do not
 certify all game shaders or resolve the separate higher-MRT SRC1 question.
+
+
+Post-load-fix Tag reached normal gameplay with textured snow, water, wood,
+metal, skin and sunset lighting. A live host-memory inspection confirms that
+table slot 79 is bound to a non-null unsigned 2D image view for the 257x513 mask;
+the incompatible float/signed/volume tables correctly leave that slot null.
+Evidence: bound-load-tables.json and inspect-bound-loads.log. The completed
+initial run has 930 audited records (excluding seven fetch-shader records),
+zero invalid resource bindings, and zero renderer errors. It remained below
+the memory guard with RPCS3 running. This was an opening check, not a full round.
+
+Repeated full image resolution reduced observed Tag performance to about 4 FPS.
+A follow-up reuses registered direct image views while still calling UpdateImage
+and issuing per-draw transitions. Image identity, registration generation,
+rebind requests, and depth associations guard reuse. Depth/stencil aliases and
+cropped images retain full resolution. The original homebrew now also checks
+three CPU rewrites after GPU writes: all 24 cases pass with zero VUID/SYNC
+reports and linear image readback disabled. Depth and subrect probes also pass;
+stencil_storage_alias passes with its required linear-output readback enabled.
+Disabling that readback fails even its direct control and is not regression
+evidence. Build: load-cache-final-build.log (BUILD_EXIT=0). Probe evidence:
+load-cache-final-runtime_image_loads.log, load-cache-final-runtime_depth_tables.log,
+load-cache-final-subrect_format_alias.log, load-cache-final-stencil-readback.log.
+
+The cached-view game run retains correct visible materials but remains slow,
+around 4–5 FPS; this is not a general performance fix. The metadata audit now
+parses fetch-shader data too: 1,010 reached records across fragment, vertex,
+compute, hull and local stages have zero invalid bindings. All 2,623 dumped
+SPIR-V modules validate (load-game-spirv-validation.log). Screenshot:
+rendering-tag-typed-loads-20261113.png. Gameover/downed desaturation is excluded
+from material comparison. Full-match coverage, the earlier transient black
+post-Ancient clothing, and higher-MRT SRC1 semantics remain unverified.
