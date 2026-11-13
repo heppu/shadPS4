@@ -1169,16 +1169,17 @@ void Rasterizer::DropRemappedTableKeys() {
     table_remapped_ranges.clear();
 }
 
-u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
-                              bool is_depth, bool is_read, AmdGpu::NumberFormat number_format) {
+static bool IsTableImageCompatible(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
+                                   bool is_depth, bool is_read,
+                                   AmdGpu::NumberFormat number_format) {
     if (!tsharp.Valid() || tsharp.Address() == 0) {
-        return 0;
+        return false;
     }
     const auto data_fmt = tsharp.GetDataFmt();
     const auto num_fmt = tsharp.GetNumberFmt();
     if (!magic_enum::enum_contains(data_fmt) || !magic_enum::enum_contains(num_fmt) ||
         data_fmt == AmdGpu::DataFormat::FormatInvalid || AmdGpu::IsFmask(data_fmt)) {
-        return 0;
+        return false;
     }
     const auto type = tsharp.GetType();
     const bool is_array_table =
@@ -1190,17 +1191,21 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
         AmdGpu::GetNumberClass(num_fmt) != AmdGpu::GetNumberClass(number_format) ||
         tsharp.GetNumberConversion() != AmdGpu::NumberConversion::None ||
         (!is_depth && !is_read &&
-         (data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32)) ||
+         (data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32))) {
+        return false;
+    }
+    return !is_depth ||
+           (data_fmt == AmdGpu::DataFormat::Format32 && num_fmt == AmdGpu::NumberFormat::Float) ||
+           (data_fmt == AmdGpu::DataFormat::Format16 && num_fmt == AmdGpu::NumberFormat::Unorm);
+}
+
+u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
+                              bool is_depth, bool is_read, AmdGpu::NumberFormat number_format) {
+    if (!IsTableImageCompatible(tsharp, table_type, is_depth, is_read, number_format) ||
         !memory->IsValidGpuMapping(tsharp.Address(), 0)) {
         return 0;
     }
     if (is_depth) {
-        if (!((data_fmt == AmdGpu::DataFormat::Format32 &&
-               num_fmt == AmdGpu::NumberFormat::Float) ||
-              (data_fmt == AmdGpu::DataFormat::Format16 &&
-               num_fmt == AmdGpu::NumberFormat::Unorm))) {
-            return 0;
-        }
         return XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(table_type) | 0x100) | 1;
     }
     if (is_read) {
@@ -1280,7 +1285,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
                                                const Shader::ImageResource& image_desc) {
     if (const auto it = table_images.find(key); it != table_images.end()) {
         auto& entry = it->second;
-        auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
+        auto* image = entry.GetImage(texture_cache);
         if (image && entry.has_direct_view && !image->binding.needs_rebind &&
             entry.resolved_generation == texture_cache.ImageGeneration() &&
             !texture_cache.GetAssociatedDepth(*image)) {
@@ -1363,7 +1368,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             return {};
         }
         const VAddr address = tsharp.Address();
-        auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
+        auto* image = entry.GetImage(texture_cache);
         // Guests that alias direct memory can fill a texture through another mapping, which
         // neither write tracking nor the sampled key is sure to notice. Compare the whole
         // content now and then, often while the texture is new.
@@ -1540,20 +1545,9 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             image_table_views.assign(table.num_entries, vk::ImageView{});
             image_table_layouts.assign(table.num_entries, vk::ImageLayout::eShaderReadOnlyOptimal);
             std::unordered_map<u64, vk::ImageView> gpu_views;
-            for (u32 i = 0; i < table.num_entries; ++i) {
-                AmdGpu::Image tsharp{};
-                std::memcpy(&tsharp,
-                            table.shadow.data() +
-                                (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
-                            table.is_r128 ? 16 : sizeof(tsharp));
-                if (table.is_r128) {
-                    tsharp.pitch = tsharp.width;
-                }
-                // The fractional minimum LOD fades streamed mips in and changes every frame.
-                tsharp.min_lod &= ~u64{0xFF};
-                tsharp.min_lod_warn = 0;
-                tsharp.counter_bank_id = 0;
-                tsharp.lod_hw_cnt_en = 0;
+            for (const auto& candidate : table.entries) {
+                const u32 i = candidate.index;
+                const auto& tsharp = candidate.sharp;
                 u64 key = TableImageKey(tsharp, table.type, table.is_depth, table.is_read,
                                         table.number_format);
                 if (key == 0) {
@@ -1587,13 +1581,15 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
     }
 
     auto& table = image_tables[table_index];
-    for (u32 i = 0; i < table.num_entries; ++i) {
+    for (const auto& candidate : table.entries) {
+        const u32 i = candidate.index;
         if (!image_table_views[i]) {
             continue;
         }
         const auto entry = table_images.find(image_table_keys[i]);
         if (entry == table_images.end() || entry->second.view != image_table_views[i] ||
-            !texture_cache.TryGetImage(entry->second.image_id, entry->second.image_uid)) {
+            (generation != texture_cache.ImageGeneration() &&
+             !texture_cache.TryGetImage(entry->second.image_id, entry->second.image_uid))) {
             image_table_views[i] = vk::ImageView{};
             image_table_keys[i] = 0;
             table.has_unresolved = true;
@@ -1690,9 +1686,33 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
-            std::memcpy(it->shadow.data(), reinterpret_cast<const void*>(address), bytes);
+            const auto* source = reinterpret_cast<const void*>(address);
+            if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
+                std::memcpy(it->shadow.data(), source, bytes);
+                it->entries.clear();
+                for (u32 i = 0; i < it->num_entries; ++i) {
+                    AmdGpu::Image tsharp{};
+                    std::memcpy(&tsharp,
+                                it->shadow.data() +
+                                    (u64{i} * it->stride_dw + it->offset_dw) * sizeof(u32),
+                                it->is_r128 ? 16 : sizeof(tsharp));
+                    if (it->is_r128) {
+                        tsharp.pitch = tsharp.width;
+                    }
+                    // Fractional LOD fades streamed mips without changing the image view.
+                    tsharp.min_lod &= ~u64{0xFF};
+                    tsharp.min_lod_warn = 0;
+                    tsharp.counter_bank_id = 0;
+                    tsharp.lod_hw_cnt_en = 0;
+                    if (IsTableImageCompatible(tsharp, it->type, it->is_depth, it->is_read,
+                                               it->number_format)) {
+                        it->entries.push_back({i, tsharp});
+                    }
+                }
+            }
         } else {
             std::ranges::fill(it->shadow, u8{0});
+            it->entries.clear();
         }
         BuildImageTableSet(table_index, &image_desc);
 
