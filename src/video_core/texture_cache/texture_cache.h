@@ -185,6 +185,7 @@ public:
         Image& image = slot_images[image_id];
         std::scoped_lock lk{image.mutex};
         image.flags |= ImageFlagBits::CpuDirty;
+        update_generation.fetch_add(1, std::memory_order_release);
     }
 
     /// Marks the image as in use without reading guest memory.
@@ -351,6 +352,10 @@ public:
         return image_generation.load(std::memory_order_acquire);
     }
 
+    [[nodiscard]] u64 UpdateGeneration() const noexcept {
+        return update_generation.load(std::memory_order_acquire);
+    }
+
     template <typename Func>
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
         std::scoped_lock lk{registry_mutex};
@@ -508,6 +513,7 @@ private:
     std::recursive_mutex registry_mutex;
     u64 sampler_generation = 0;
     std::atomic<u64> image_generation = 0;
+    std::atomic<u64> update_generation = 0;
     std::mutex download_images_mutex;
     absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
 };
