@@ -1086,3 +1086,21 @@ budget, while retaining the same 12,000 MiB combined-VRAM watchdog limit. The
 override is not a hard resident cap, and lowering it can increase texture-cache
 pressure rather than reliably constrain memory. Further map checks use the
 usable budget with fresh processes.
+
+
+Classified completes Conference Room gameplay and a settled report on the same
+renderer with the 6 GiB driver override. Surveillance imagery, glossy tables,
+leather chairs, scattered papers, carpet, shadows and weapon highlights remain
+visible. The settled Dempsey report shows complete textured clothing, skin and
+hair; the first transition frame is not used as the settled comparison. The
+report records 0 kills, 500 points, round 1 and 1m26s. Movement, pistol input,
+damage and revival execute; no full round is claimed. Gameplay is about 1–2 FPS,
+so this is not a playability pass. Screenshots:
+rendering-classified-exec-fixed-20261113.png and
+rendering-classified-report-exec-fixed-20261113.png.
+
+The 633 in-container watchdog samples peak at 9,072 MiB combined VRAM and
+1,951 MiB GTT, with at least 21,499 MiB available RAM. No limit event occurs.
+RPCS3 remains running. guarded-classified-game.log contains zero renderer errors
+and critical messages (Vulkan game validation disabled); resource samples are
+in guarded-classified-memory.log.
