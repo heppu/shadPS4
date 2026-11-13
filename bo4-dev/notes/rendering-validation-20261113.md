@@ -570,3 +570,42 @@ partial frame replays with invalid-looking geometry and must not be treated as
 live visual evidence. The final presentation has coherent background colors and
 fire, with character ghosting; it is not a pixel-identical live oracle. Evidence:
 out/ship-fix/fresh-lobby-replay-present.png and fresh-lobby-scan.txt.
+
+
+### Raw buffer reads missed GPU-written images
+
+The capture-enabled run without an initial capture also reproduced the bad
+reflection. Its shader profile matched the normal process. A later capture
+spanning multiple submit boundaries provided a coherent second guest-frame
+sequence; the partial first sequence remains unsuitable as visual evidence.
+Artifact: out/ship-fix/classified-reflection-three-frames.rdc (1,964,925,142 bytes).
+
+In that second sequence, water draw 11791 changes scene pixel (940,795) from
+approximately (0.0128,0.0198,0.0391) to (108,0.03369,0.01221). It samples a
+reflection image at guest 0x242f3b8000 containing extreme values and stripes,
+and a zero-filled depth copy at 0x242eab8000. Raw-buffer dispatches 11732 and
+11758 copy those allocations from live color/depth image addresses 0x2429320000
+and 0x2426b88000. Their sources were not synchronized from the GPU images before
+ordinary buffer reads. Evidence: reflection-copy-chain/chain.txt,
+reflection-input-history/history.txt, and reflection-three-frames-present.png
+under out/ship-fix.
+
+Original OpenOrbis probe image_raw_buffer_copy independently reproduces the
+coherence defect: baseline 17345b92 passes the CPU-initialized control but reads
+stale 0x12345678 after a GPU image write whose expected first word is 0x10213000.
+The fix synchronizes read-only raw buffers as well as texel buffers, prevents
+small image-backed reads from bypassing the cache, and supports interior reads
+by staging the full tiled image and copying only the requested byte interval.
+Image lookup prefers a unique exact allocation match or a unique containing
+image; it does not arbitrarily select between ambiguous aliases.
+
+Build succeeds. The probe passes tiled and linear layouts, two GPU writes per
+layout, 64-byte reads at offsets 0/4/4096, and output guards, with zero Vulkan
+core/synchronization reports. Six regressions also pass with zero reports:
+subrect_format_alias, stencil_storage_alias, depth_sample_attachment,
+runtime_image_updates, runtime_image_identity, and dynamic_scalar_reads.
+Logs: raw-image-copy-baseline.log, raw-image-copy-fixed.log,
+raw-image-copy-fix-build.log, and raw-copy-regression-*.log under out/ship-fix.
+The original probe source is shared under hardware-tests/tests/image_raw_buffer_copy.
+No physical PS4 result is available. Normal-game validation of this fix remains
+pending at this checkpoint; the separate higher-MRT SRC1 question is unresolved.
