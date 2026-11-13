@@ -225,6 +225,18 @@ private:
         u64 full_hash{};
         u64 verify_tick{};
         u32 verify_interval{};
+        VideoCore::Image* image{};
+        u64 image_generation{};
+
+        VideoCore::Image* GetImage(VideoCore::TextureCache& cache) {
+            // Slot addresses stay stable until unregistration advances the generation.
+            const u64 generation = cache.ImageGeneration();
+            if (!image || image_generation != generation) {
+                image = cache.TryGetImage(image_id, image_uid);
+                image_generation = generation;
+            }
+            return image;
+        }
     };
     /// One immutable version of a table's descriptors.
     struct ImageTableSet {
@@ -237,6 +249,10 @@ private:
         std::vector<vk::ImageView> views;
         std::vector<vk::ImageLayout> layouts;
     };
+    struct ImageTableEntry {
+        u32 index;
+        AmdGpu::Image sharp;
+    };
     struct ImageTable {
         VAddr address{};
         u32 bytes{};
@@ -245,6 +261,7 @@ private:
         u32 num_entries{};
         AmdGpu::ImageType type{};
         std::vector<u8> shadow;
+        std::vector<ImageTableEntry> entries;
         u64 checked_tick{};
         u64 checked_generation{};
         s32 current_set{-1};
