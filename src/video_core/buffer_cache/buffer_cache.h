@@ -4,6 +4,8 @@
 #pragma once
 
 #include <deque>
+#include <map>
+#include <mutex>
 #include <span>
 #include <unordered_map>
 #include <boost/container/small_vector.hpp>
@@ -147,6 +149,8 @@ private:
     const Buffer* GetArena(u64 first_block, u64 last_block);
 
     void EnsureResident(const Buffer* arena, u64 first_block, u64 last_block);
+    vk::DeviceMemory AllocateBacking(u32 num_blocks);
+    void RecycleBacking(vk::DeviceMemory memory, u32 num_blocks);
 
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async);
 
@@ -199,7 +203,14 @@ private:
         }
     };
     IntervalList<Backing> resident_ranges;
-    std::unordered_map<VkDeviceMemory, u32> backing_blocks;
+    struct BackingAllocation {
+        u32 remaining_blocks;
+        u32 size_blocks;
+    };
+    std::unordered_map<VkDeviceMemory, BackingAllocation> backing_blocks;
+    std::multimap<u32, vk::DeviceMemory> backing_pool;
+    std::mutex backing_pool_mutex;
+    u64 backing_pool_bytes{};
 
     /// Backing of an unmapped region, kept until the GPU is done with the tick it was released in.
     struct Zombie : public Backing {
