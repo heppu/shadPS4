@@ -123,6 +123,7 @@ public:
                    desc.table_offset_dw == existing.table_offset_dw &&
                    desc.table_size == existing.table_size &&
                    desc.table_type == existing.table_type && desc.is_array == existing.is_array &&
+                   (!desc.IsTable() || desc.is_depth == existing.is_depth) &&
                    desc.mip_fallback_mode == existing.mip_fallback_mode &&
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
