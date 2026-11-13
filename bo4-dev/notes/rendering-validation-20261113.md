@@ -121,3 +121,26 @@ The preserved muzzle-flash frame `rendering-fire-20261113.png` shows lit reflect
 weapon surfaces, skin, textured zombies, deck, restored ship geometry and fog.
 This is representative scene/effect coverage, not a full-match/all-map claim.
 Local frames/logs: out/ascending-*.png and out/ship-fix/ascending-gameplay-final.log.
+
+
+## Follow-up: writable stencil aliases
+
+IX exposed a separate R8 stencil alias being redirected to a depth/stencil storage
+view, producing 00339, 00344 and 07028. Writable stencil aliases now retain their
+R8 backing; stencil bytes are copied from the associated depth image before use
+and copied back after the dispatch, without replacing depth. The association is
+also preserved when a placeholder first becomes a real image. The transfer path
+currently handles single-sample surfaces.
+
+Independent OpenOrbis homebrew `stencil_storage_alias` writes depth 0.5/stencil
+0x35, increments one stencil pixel twice through R8_UINT storage, and checks the
+result using depth/stencil tests at every pixel. The baseline passes its ordinary
+draw control but fails both storage phases, with 00339/07028. The fixed build
+passes all three cases with core and synchronization validation enabled and zero
+VUID reports. Original shader source and build files accompany the fix. Physical
+PS4 validation is unavailable; these are emulator results.
+
+Local evidence: out/ship-fix/stencil-probe-baseline.log,
+stencil-association-test.log, stencil-dispatch.rdc and stencil-dispatch2.rdc.
+The captures isolated the missing first-use association. The temporary capture
+hooks were removed before the passing build. Live IX verification is in progress.
