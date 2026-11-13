@@ -1172,10 +1172,11 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
     // Table images are declared as one float-sampled type per table. Formats that may alias a
     // depth buffer are left out because GPU-written surfaces need per-draw handling.
     const auto type = tsharp.GetType();
+    const bool is_array_table =
+        table_type == AmdGpu::ImageType::Cube || table_type == AmdGpu::ImageType::Color2DArray;
     const bool is_type_match =
-        table_type == AmdGpu::ImageType::Color2D
-            ? type == AmdGpu::ImageType::Color2D
-            : type == AmdGpu::ImageType::Cube || type == AmdGpu::ImageType::Color2DArray;
+        is_array_table ? type == AmdGpu::ImageType::Cube || type == AmdGpu::ImageType::Color2DArray
+                       : type == table_type;
     if (!is_type_match || AmdGpu::IsInteger(num_fmt) ||
         tsharp.GetNumberConversion() != AmdGpu::NumberConversion::None ||
         data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32 ||
@@ -1204,7 +1205,8 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
     if (table_keys.size() >= MaxCachedKeys) {
         table_keys.clear();
     }
-    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const Shader::ImageResource resource{.is_array = table_type == AmdGpu::ImageType::Cube ||
+                                                     table_type == AmdGpu::ImageType::Color2DArray};
     const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
     table_keys.insert_or_assign(descriptor,
                                 TableKey{key, epoch, desc.info.guest_address,
@@ -1217,7 +1219,8 @@ u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp,
     static constexpr u64 SampleSize = 64;
     static constexpr u64 NumSamples = 64;
     // Sample the memory the image really reads, streamed textures often lack their top mips.
-    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const Shader::ImageResource resource{.is_array = table_type == AmdGpu::ImageType::Cube ||
+                                                     table_type == AmdGpu::ImageType::Color2DArray};
     const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
     std::array<u8, SampleSize * NumSamples> samples;
     if (!memory->SampleDirect(desc.info.guest_address, desc.info.guest_size, samples, NumSamples)) {
@@ -1238,7 +1241,8 @@ u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp,
 
 u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) {
     static constexpr u64 ChunkSize = 64;
-    const Shader::ImageResource resource{.is_array = table_type != AmdGpu::ImageType::Color2D};
+    const Shader::ImageResource resource{.is_array = table_type == AmdGpu::ImageType::Cube ||
+                                                     table_type == AmdGpu::ImageType::Color2DArray};
     const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
     const u64 count = desc.info.guest_size / ChunkSize;
     if (count < 2) {
@@ -1551,7 +1555,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
 
     const u64 gc_tick = TableEpoch();
     // Guests alternate between copies of a table, coming back to one means it was rewritten.
-    auto& last_table = last_image_tables[it->type == AmdGpu::ImageType::Color2D ? 0 : 1];
+    auto& last_table = last_image_tables[static_cast<size_t>(it->type)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
     if (it->current_set < 0 || it->checked_tick != gc_tick || is_switched) {
         it->checked_tick = gc_tick;
