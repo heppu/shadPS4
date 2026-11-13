@@ -173,3 +173,19 @@ verification of the volume change is in progress.
 
 Evidence: out/ship-fix/ix-lighting-investigation.log, ix-table1.json, ix-table2.json,
 volume-table-descriptors.log, volume-probe-baseline.log and volume-regression-*.log.
+
+
+The subsequent live IX run reaches the arena with textured stone, wood, banners,
+lit skin and reflective weapon metal visible in `rendering-ix-volume-20261113.png`.
+The corridor remains appropriately darker than the sunlit arena. The downed
+state also retains weapon detail and renders the blood overlay/desaturation.
+The run has zero Vulkan VUID reports through gameplay and game over. This is
+short representative coverage; no completed round or all-map validation is claimed.
+Unresolved SRT-walker diagnostics remain in the cold shader compilation log.
+The menu player portrait and Alpha Omega thumbnail still require investigation.
+The user has confirmed no physical PS4 is available for the blend measurement.
+
+Local evidence: out/volume-ix-{gameplay,gate,combat,exitfocus}.png and
+out/ship-fix/volume-fixed-ix-gameplay.log. The local shared homebrew bundle
+`out/bo4-rendering-probes.tar.gz` now includes runtime_image_dimensions and
+runtime_buffer_table alongside the four earlier rendering probes.
