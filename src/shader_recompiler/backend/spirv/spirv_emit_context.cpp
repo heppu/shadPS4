@@ -280,7 +280,8 @@ void EmitContext::DefineAmdPerVertexAttribs() {
     }
     for (s32 i = 0; i < runtime_info.hw.fs.num_inputs; i++) {
         const auto& input = runtime_info.hw.fs.inputs[i];
-        if (input.IsDefault() || info.fs_interpolation[i].primary != Qualifier::PerVertex) {
+        if (input.IsDefault() || !info.loads.GetAny(IR::Attribute::Param0 + i) ||
+            info.fs_interpolation[i].primary != Qualifier::PerVertex) {
             continue;
         }
         auto& param = input_params[i];
@@ -453,10 +454,10 @@ void EmitContext::DefineInputs() {
 
         for (s32 i = 0; i < num_inputs; i++) {
             const auto& input = runtime_info.hw.fs.inputs[i];
-            if (input.IsDefault()) {
+            const IR::Attribute param = IR::Attribute::Param0 + i;
+            if (input.IsDefault() || !info.loads.GetAny(param)) {
                 continue;
             }
-            const IR::Attribute param = IR::Attribute::Param0 + i;
             const u32 num_components = info.loads.NumComponents(param);
             const auto [primary, auxiliary] = info.fs_interpolation[i];
             const Id type = F32[num_components];

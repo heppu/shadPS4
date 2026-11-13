@@ -80,6 +80,15 @@ GraphicsPipeline::GraphicsPipeline(
         .topology = topology,
     };
 
+    u32 fs_input_mask{};
+    if (const auto* fs_info = infos[u32(Shader::SwStage::Fragment)]) {
+        for (u32 i = 0; i < Shader::IR::NumParams; ++i) {
+            if (fs_info->loads.GetAny(Shader::IR::Attribute::Param0 + i)) {
+                fs_input_mask |= 1u << i;
+            }
+        }
+    }
+
     const bool is_rect_list = key.prim_type == AmdGpu::PrimitiveType::RectList;
     const bool is_quad_list = key.prim_type == AmdGpu::PrimitiveType::QuadList;
     const vk::PipelineTessellationStateCreateInfo tessellation_state = {
@@ -189,7 +198,8 @@ GraphicsPipeline::GraphicsPipeline(
         const auto type = is_quad_list ? AuxShaderType::QuadListTCS : AuxShaderType::RectListTCS;
         if (!preloading) {
             const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
-            sdata.tcs = Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info);
+            sdata.tcs =
+                Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info, fs_input_mask);
         }
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationControl,
@@ -208,7 +218,7 @@ GraphicsPipeline::GraphicsPipeline(
         if (!preloading) {
             const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
             sdata.tes = Shader::Backend::SPIRV::EmitAuxilaryTessShader(
-                AuxShaderType::PassthroughTES, fs_info);
+                AuxShaderType::PassthroughTES, fs_info, fs_input_mask);
         }
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationEvaluation,
