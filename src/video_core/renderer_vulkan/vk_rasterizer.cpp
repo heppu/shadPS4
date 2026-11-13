@@ -1278,6 +1278,31 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
 
 vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 key,
                                                const Shader::ImageResource& image_desc) {
+    if (const auto it = table_images.find(key); it != table_images.end()) {
+        auto& entry = it->second;
+        auto* image = texture_cache.TryGetImage(entry.image_id, entry.image_uid);
+        if (image && entry.has_direct_view && !image->binding.needs_rebind &&
+            entry.resolved_generation == texture_cache.ImageGeneration() &&
+            !texture_cache.GetAssociatedDepth(*image)) {
+            texture_cache.UpdateImage(entry.image_id);
+            if (!image->binding.is_bound) {
+                bound_images.emplace_back(entry.image_id);
+                image->binding.is_bound = 1u;
+            }
+            auto layout = image->info.props.is_depth ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+                                                     : vk::ImageLayout::eShaderReadOnlyOptimal;
+            if (!image->info.props.is_depth &&
+                (image->binding.force_general || image->binding.is_target)) {
+                layout = vk::ImageLayout::eGeneral;
+            }
+            needs_barrier |=
+                runtime.Transit(image, layout, vk::PipelineStageFlagBits2::eAllCommands,
+                                vk::AccessFlagBits2::eShaderRead, entry.range);
+            entry.layout = layout;
+            entry.used_tick = TableEpoch();
+            return entry.view;
+        }
+    }
     VideoCore::TextureCache::ImageDesc desc{tsharp, image_desc};
     auto image_id = texture_cache.FindImage(desc);
     if (const auto depth_id = texture_cache.GetAssociatedDepth(texture_cache.GetImage(image_id))) {
@@ -1307,14 +1332,20 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
         needs_barrier |= runtime.Transit(&image, layout, vk::PipelineStageFlagBits2::eAllCommands,
                                          vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
     }
-    table_images.insert_or_assign(key, TableImage{
-                                           .image_id = image_id,
-                                           .image_uid = image.image_uid,
-                                           .view = view,
-                                           .layout = layout,
-                                           .used_tick = TableEpoch(),
-                                           .resolved_address = tsharp.Address(),
-                                       });
+    table_images.insert_or_assign(
+        key,
+        TableImage{
+            .image_id = image_id,
+            .image_uid = image.image_uid,
+            .view = view,
+            .layout = layout,
+            .range = desc.view_info.range,
+            .resolved_generation = texture_cache.ImageGeneration(),
+            .has_direct_view = !desc.IsSubrectTexture(image.info) && !image.info.props.is_depth &&
+                               image.info.guest_address == tsharp.Address(),
+            .used_tick = TableEpoch(),
+            .resolved_address = tsharp.Address(),
+        });
     return view;
 }
 
