@@ -12,8 +12,8 @@ using Sirit::Id;
 constexpr u32 SPIRV_VERSION_1_5 = 0x00010500;
 
 struct QuadRectListEmitter : public Sirit::Module {
-    explicit QuadRectListEmitter(const HwFragmentRuntimeInfo& fs_info_)
-        : Sirit::Module{SPIRV_VERSION_1_5}, fs_info{fs_info_} {
+    explicit QuadRectListEmitter(const HwFragmentRuntimeInfo& fs_info_, u32 input_mask_)
+        : Sirit::Module{SPIRV_VERSION_1_5}, fs_info{fs_info_}, input_mask{input_mask_} {
         void_id = TypeVoid();
         bool_id = TypeBool();
         float_id = TypeFloat(32);
@@ -255,7 +255,7 @@ private:
         outputs.reserve(fs_info.num_inputs);
         for (int i = 0; i < fs_info.num_inputs; i++) {
             const auto& input = fs_info.inputs[i];
-            if (input.IsDefault()) {
+            if (input.IsDefault() || (input_mask & (1u << i)) == 0) {
                 continue;
             }
             outputs.emplace_back(AddOutput(model == spv::ExecutionModel::TessellationControl
@@ -279,7 +279,7 @@ private:
         inputs.reserve(fs_info.num_inputs);
         for (int i = 0; i < fs_info.num_inputs; i++) {
             const auto& input = fs_info.inputs[i];
-            if (input.IsDefault()) {
+            if (input.IsDefault() || (input_mask & (1u << i)) == 0) {
                 continue;
             }
             inputs.emplace_back(AddInput(float_arr));
@@ -289,6 +289,7 @@ private:
 
 private:
     HwFragmentRuntimeInfo fs_info;
+    u32 input_mask;
     Id main;
     Id void_id;
     Id bool_id;
@@ -319,8 +320,9 @@ private:
     std::vector<Id> interfaces;
 };
 
-std::vector<u32> EmitAuxilaryTessShader(AuxShaderType type, const HwFragmentRuntimeInfo& fs_info) {
-    QuadRectListEmitter ctx{fs_info};
+std::vector<u32> EmitAuxilaryTessShader(AuxShaderType type, const HwFragmentRuntimeInfo& fs_info,
+                                        u32 input_mask) {
+    QuadRectListEmitter ctx{fs_info, input_mask};
     switch (type) {
     case AuxShaderType::RectListTCS:
         ctx.EmitRectListTCS();
