@@ -1,0 +1,10 @@
+#!/bin/sh
+# usage: run [seconds]   headless run, killed after N seconds (container name: shad-run)
+cd "$(dirname "$0")"
+T=${1:-90}
+N=$(date +%m%d-%H%M%S); R=out/runs/$N; mkdir -p $R; ln -sfn runs/$N out/last
+docker rm -f shad-run >/dev/null 2>&1; while docker ps -a --format "{{.Names}}" | /bin/busybox grep -qx shad-run; do sleep 0.5; done
+SD_DOCKER_ARGS="--name shad-run" ./sd env SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}" /mnt/games/PS4/bo4-dev/headless sh -c "cd /out && timeout -s KILL $T /src/build/shadps4 -g /mnt/games/PS4/CUSA11100/eboot.bin -f false" > $R/stdout.txt 2>&1
+echo "exit=$?" >> $R/stdout.txt
+cp user/log/shad_log.txt $R/ 2>/dev/null
+echo $R; tail -3 $R/stdout.txt | cut -c1-300

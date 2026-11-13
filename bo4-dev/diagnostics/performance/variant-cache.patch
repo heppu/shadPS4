@@ -1,0 +1,38 @@
+diff --git a/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp b/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+index b8fdb710..786ca2a4 100644
+--- a/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
++++ b/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+@@ -748,7 +748,12 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
+ 
+     vk::ShaderModule module{};
+ 
+-    const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
++    auto it = program->last_module < program->modules.size()
++                  ? program->modules.begin() + program->last_module
++                  : program->modules.end();
++    if (it == program->modules.end() || !(it->spec == spec)) {
++        it = std::ranges::find(program->modules, spec, &Program::Module::spec);
++    }
+     if (it == program->modules.end()) {
+         auto new_info = std::make_unique<Shader::Info>(hw_stage, sw_stage, params);
+         module = CompileModule(*new_info, runtime_info, params.code, perm_idx, binding);
+@@ -766,6 +771,7 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
+         }
+         program->PermutInfo(perm_idx).AddBindings(binding);
+     }
++    program->last_module = perm_idx;
+     if (auto& fetch = program->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
+         fetch_shader = &fetch;
+     }
+diff --git a/src/video_core/renderer_vulkan/vk_pipeline_cache.h b/src/video_core/renderer_vulkan/vk_pipeline_cache.h
+index 3578ce5b..3f4ad4b6 100644
+--- a/src/video_core/renderer_vulkan/vk_pipeline_cache.h
++++ b/src/video_core/renderer_vulkan/vk_pipeline_cache.h
+@@ -50,6 +50,7 @@ struct Program {
+ 
+     Shader::Info info;
+     ModuleList modules{};
++    size_t last_module{};
+ 
+     Program() = default;
+     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)

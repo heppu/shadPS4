@@ -1,0 +1,46 @@
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.cpp b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+index 5826f24d..0ddf7e7e 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -1676,9 +1676,16 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
+                 if (!refresh_all && !candidate.is_dynamic &&
+                     candidate.update_version ==
+                         texture_cache.ImageUpdateVersion(candidate.image_id)) {
+-                    const auto cached = table_images.find(candidate.key);
+-                    if (cached != table_images.end() && cached->second.GetImage(texture_cache)) {
+-                        auto& resolved = cached->second;
++                    // Every insertion or removal advances this generation, including rehashes.
++                    if (!candidate.resolved ||
++                        candidate.resolved_generation != table_view_generation) {
++                        const auto cached = table_images.find(candidate.key);
++                        candidate.resolved =
++                            cached != table_images.end() ? &cached->second : nullptr;
++                        candidate.resolved_generation = table_view_generation;
++                    }
++                    if (candidate.resolved && candidate.resolved->GetImage(texture_cache)) {
++                        auto& resolved = *candidate.resolved;
+                         if (resolved.used_tick != epoch) {
+                             resolved.used_tick = epoch;
+                             texture_cache.KeepAlive(resolved.image_id);
+@@ -1722,6 +1729,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
+                 }
+                 if (view) {
+                     auto& resolved = table_images.at(key);
++                    candidate.resolved = &resolved;
++                    candidate.resolved_generation = table_view_generation;
+                     set_entry(i, key, view, resolved.layout);
+                     const auto* image = resolved.GetImage(texture_cache);
+                     candidate.image_id = resolved.image_id;
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.h b/src/video_core/renderer_vulkan/vk_rasterizer.h
+index 49cb7177..7795053d 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.h
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.h
+@@ -285,6 +285,8 @@ private:
+         bool is_dynamic{true};
+         VideoCore::ImageId image_id{};
+         u64 update_version{};
++        TableImage* resolved{};
++        u64 resolved_generation{};
+     };
+     struct ImageTable {
+         VAddr address{};

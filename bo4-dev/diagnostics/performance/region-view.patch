@@ -1,0 +1,27 @@
+diff --git a/src/video_core/texture_cache/texture_cache.cpp b/src/video_core/texture_cache/texture_cache.cpp
+index dd9cd54c..138dac52 100644
+--- a/src/video_core/texture_cache/texture_cache.cpp
++++ b/src/video_core/texture_cache/texture_cache.cpp
+@@ -637,7 +637,7 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
+     return new_image_id;
+ }
+ 
+-SmallVector<ImageId, 8> TextureCache::FindImagesInRegion(VAddr address, size_t size) {
++const SmallVector<ImageId, 8>& TextureCache::FindImagesInRegion(VAddr address, size_t size) {
+     const u64 registration_generation =
+         image_registration_generation.load(std::memory_order_acquire);
+     const u64 removal_generation = image_generation.load(std::memory_order_acquire);
+diff --git a/src/video_core/texture_cache/texture_cache.h b/src/video_core/texture_cache/texture_cache.h
+index e26d2c0c..2ffc4f7d 100644
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -417,7 +417,8 @@ public:
+     }
+ 
+ private:
+-    SmallVector<ImageId, 8> FindImagesInRegion(VAddr address, size_t size);
++    // Copy the result before a nested region lookup can replace its cached list.
++    const SmallVector<ImageId, 8>& FindImagesInRegion(VAddr address, size_t size);
+ 
+     /// Iterate over all page indices in a range
+     template <typename Func>

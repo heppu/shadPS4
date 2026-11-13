@@ -1,0 +1,28 @@
+{
+  "pgo-refreshed": {
+    "fps": 22.683309949122936,
+    "render_cpu_ms_per_frame": 22.939015429831002,
+    "gpu_busy_mean_percent": 56.049180327868854
+  },
+  "region-view": {
+    "fps": 18.11664802374167,
+    "render_cpu_ms_per_frame": 26.577736890524378,
+    "gpu_busy_mean_percent": 59.14754098360656
+  },
+  "region-view-repeat": {
+    "fps": 23.399974513152085,
+    "render_cpu_ms_per_frame": 22.97720797720797,
+    "gpu_busy_mean_percent": 53.63934426229508
+  },
+  "control-idle": {
+    "fps": 28.899968584278152,
+    "render_cpu_ms_per_frame": 18.471741637831602,
+    "gpu_busy_mean_percent": 53.622950819672134
+  },
+  "decision": "Region-list borrowing removed: healthy repeat has unchanged CPU time per frame, no established benefit.",
+  "visual_review": {
+    "region-view": "All six reviewed; contains podium collision, damage/downed/revive; invalid healthy comparison.",
+    "region-view-repeat": "All six reviewed, alive 200 health and two revives; textured materials.",
+    "control-idle": "All six reviewed: damage/downed/revive; no severe collapse reproduced. Different route/character from interval candidate, not proof of cause."
+  }
+}

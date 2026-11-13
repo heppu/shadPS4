@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs inside the container: start a headless sway, then exec the given command in it.
+export XDG_RUNTIME_DIR=/tmp/rt
+mkdir -p $XDG_RUNTIME_DIR && chmod 700 $XDG_RUNTIME_DIR
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=${WLR_RENDERER:-gles2} \
+  sway -c /mnt/games/PS4/bo4-dev/sway.conf > /out/sway.log 2>&1 &
+for i in $(seq 50); do [ -S $XDG_RUNTIME_DIR/wayland-1 ] && break; sleep 0.1; done
+export WAYLAND_DISPLAY=wayland-1 SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-wayland} SDL_AUDIODRIVER=dummy
+[ "$SDL_VIDEODRIVER" = x11 ] && { for i in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && break; sleep 0.1; done; export DISPLAY=:0; }
+exec /mnt/games/PS4/bo4-dev/guard "$@"

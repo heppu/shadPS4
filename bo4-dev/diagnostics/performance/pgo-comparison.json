@@ -1,0 +1,36 @@
+{
+  "source_commit": "0e8b7cc2d4b42483634aa7eafbced7e5d3ce341f",
+  "compiler": "Clang O2 native CPU PGO; no ThinLTO; no training instrumentation",
+  "runs": {
+    "binding-control": {
+      "fps": 21.633311549295787,
+      "complete": true,
+      "render_cpu_ms_per_frame": 24.17565485362096,
+      "gpu_busy_mean_percent": 55.24590163934426
+    },
+    "pgo-refreshed": {
+      "fps": 22.683309949122936,
+      "complete": true,
+      "render_cpu_ms_per_frame": 22.939015429831002,
+      "gpu_busy_mean_percent": 56.049180327868854
+    },
+    "pgo-control-repeat": {
+      "fps": 23.56664237299541,
+      "complete": true,
+      "render_cpu_ms_per_frame": 22.41867043847242,
+      "gpu_busy_mean_percent": 54.01639344262295
+    }
+  },
+  "probes_passed": 27,
+  "known_validation_message": "SYNC-HAZARD-WRITE-AFTER-PRESENT",
+  "decision": "No reliable gameplay speedup established: the control repeat is faster than the refreshed profile. Both profiles and exact executables are preserved.",
+  "limitations": [
+    "GPU auto and unrestricted render-thread CPU placement",
+    "Default 200-health gameplay; all six captures in each run alive with two revives remaining",
+    "Scene, character and enemy variation remain",
+    "Not comparable to older high-policy/CPU7 play-fast measurements"
+  ],
+  "pgo.profdata_sha256": "0c5a9b4f7f44257835321b3d7c8a3a85a002a2b4eb64bc03feec189f49dacc96",
+  "shadps4-pgo-refreshed_sha256": "b943ec1d0a865196f7d61f296bdbd6371ed58fb31bd5d41e1195031a45e7259f",
+  "shadps4-before-binding-pass_sha256": "145ddb80a07ac5da8471dcc5589abec159f96b047187f36a7fb22e6505d055e1"
+}

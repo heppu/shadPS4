@@ -1,0 +1,62 @@
+{
+  "probes_passed": 27,
+  "control": "refreshed PGO source 0e8b7cc2",
+  "candidate": "same profile plus sorted IntervalList append fast path",
+  "micro": {
+    "interval-micro": {
+      "control": {
+        "us": [
+          36727,
+          32849,
+          33508
+        ],
+        "mean_us": 34361.333333333336,
+        "median_us": 33508
+      },
+      "candidate": {
+        "us": [
+          33779,
+          34406,
+          32656
+        ],
+        "mean_us": 33613.666666666664,
+        "median_us": 33779
+      }
+    },
+    "interval-confirm": {
+      "control": {
+        "us": [
+          35683,
+          35135,
+          34905,
+          32988,
+          34553,
+          32883
+        ],
+        "mean_us": 34357.833333333336,
+        "median_us": 34729.0
+      },
+      "candidate": {
+        "us": [
+          35985,
+          35610,
+          33160,
+          36415,
+          35209,
+          33174
+        ],
+        "mean_us": 34925.5,
+        "median_us": 35409.5
+      }
+    }
+  },
+  "native_status": "Completed; rejected as optimization evidence",
+  "native": {
+    "fps": 5.233330674803446,
+    "render_cpu_ms_per_frame": 67.19745222929936,
+    "reviewed_captures": "all six; slowdown starts before downed at 30 seconds; revived by 60 seconds",
+    "valid_healthy_comparison": false
+  },
+  "decision": "Removed from core. No repeatable compute benefit; native run developed a severe slowdown. Cause not attributed to the interval code without control reproduction.",
+  "stall_profile": "Later black/loading-screen sample: buffer readbacks, scheduler finishes, sparse binds, and backing memory release dominate; distinct from healthy resource-binding profile."
+}

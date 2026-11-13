@@ -1,0 +1,13 @@
+set pagination off
+set confirm off
+set print thread-events off
+handle SIGSEGV SIGBUS SIGILL SIGUSR1 SIGUSR2 SIGPWR SIGXCPU nostop noprint pass
+source /mnt/games/PS4/bo4-dev/watch.py
+run
+echo \n==== WATCH HIT ====\n
+info threads
+bt 15
+info registers
+x/40i $pc-0x60
+x/64gx $rsp
+kill

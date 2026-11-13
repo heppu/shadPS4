@@ -1,0 +1,4 @@
+#!/bin/sh
+# usage: dis <start> <end>   disassemble out/eboot.mem (base 0x400000)
+cd "$(dirname "$0")"
+./sd objdump -D -b binary -mi386:x86-64 -Mintel --adjust-vma=0x400000 --start-address=$1 --stop-address=$2 /out/eboot.mem | /bin/busybox grep -E '^ +[0-9a-f]+:' | cut -f1,3

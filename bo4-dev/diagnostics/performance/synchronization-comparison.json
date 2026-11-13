@@ -1,0 +1,49 @@
+{
+  "batched-running": {
+    "fps": 30.716641160604922,
+    "render_cpu_ms_per_frame": 19.799240368963645,
+    "gpu_busy_mean_percent": 46.40983606557377
+  },
+  "overlap-control-running": {
+    "fps": 30.69996601257365,
+    "render_cpu_ms_per_frame": 19.793702497285558,
+    "gpu_busy_mean_percent": 46.22950819672131
+  },
+  "precise-poll-running": {
+    "fps": 29.1499690432211,
+    "render_cpu_ms_per_frame": 20.526014865637507,
+    "gpu_busy_mean_percent": 47.19672131147541
+  },
+  "control-health": {
+    "fps": 20.199977799216626,
+    "render_cpu_ms_per_frame": 20.37953795379538,
+    "gpu_busy_mean_percent": 65.59016393442623
+  },
+  "selective-health": {
+    "fps": 22.649995231049818,
+    "render_cpu_ms_per_frame": 21.766004415011025,
+    "gpu_busy_mean_percent": 60.75409836065574
+  },
+  "limitations": [
+    "custom-health uses 350 health and Short regeneration, separate from default gameplay",
+    "precise-poll-running contains downed gameplay; invalid healthy comparison",
+    "batching showed no improvement and was removed",
+    "scene/character/enemy differences prevent claiming deterministic FPS gain",
+    "existing WRITE-AFTER-PRESENT warning and control physical-alias image failure remain",
+    "60 FPS has not been achieved"
+  ],
+  "reviewed_captures": {
+    "control-health": "all six 10-second captures alive at 350 health",
+    "selective-health": "all six 10-second captures alive at 350 health",
+    "overlap-control-running": "all six captures alive at 200 health",
+    "batched-running": "all six captures alive at 200 health"
+  },
+  "deferred-health2": {
+    "fps": 22.016642471478157,
+    "render_cpu_ms_per_frame": 23.058289174867507,
+    "valid_healthy_comparison": false,
+    "reason": "Player downed at 30 seconds; no matched improvement established",
+    "decision": "Prototype removed; patch and binary preserved",
+    "probes_passed": 26
+  }
+}

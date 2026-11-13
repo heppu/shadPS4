@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Run a command with a memory watchdog inside its container."""
+
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("usage: guard command [args ...]", file=sys.stderr)
+        return 2
+
+    limits = tuple(int(os.environ.get(k, v)) for k, v in
+                   (("VRAM_MAX", "12000"), ("GTT_MAX", "4000"), ("RAM_MIN", "10000")))
+    devices = [p for p in Path("/sys/class/drm").glob("card*/device")
+               if (p / "mem_info_vram_total").is_file()]
+    if not devices:
+        print("guard: GPU memory counters unavailable", file=sys.stderr)
+        return 1
+    device = max(devices, key=lambda p: int((p / "mem_info_vram_total").read_text()))
+    log_path = Path(os.environ.get("GUARD_LOG", "/out/guard.log"))
+    child = None
+
+    def stop_child():
+        if child is not None and child.poll() is None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+
+    def interrupted(signum, frame):
+        raise InterruptedError(signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, interrupted)
+
+    try:
+        with log_path.open("a", buffering=1) as log:
+            while True:
+                vram = int((device / "mem_info_vram_used").read_text()) // 1048576
+                gtt = int((device / "mem_info_gtt_used").read_text()) // 1048576
+                meminfo = Path("/proc/meminfo").read_text().splitlines()
+                ram = next(int(line.split()[1]) // 1024 for line in meminfo
+                           if line.startswith("MemAvailable:"))
+                exceeded = vram > limits[0] or gtt > limits[1] or ram < limits[2]
+                stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                print(f"{stamp} guard={os.getpid()} vram={vram} gtt={gtt} ramfree={ram}"
+                      + (" LIMIT" if exceeded else ""), file=log)
+                if exceeded:
+                    print(f"guard: memory limit exceeded: vram={vram}, gtt={gtt}, ramfree={ram}",
+                          file=sys.stderr)
+                    return 137
+                if child is None:
+                    child = subprocess.Popen(sys.argv[1:], start_new_session=True)
+                try:
+                    result = child.wait(timeout=0.5)
+                    return result if result >= 0 else 128 - result
+                except subprocess.TimeoutExpired:
+                    pass
+    except InterruptedError as error:
+        return 128 + error.args[0]
+    except (OSError, ValueError, StopIteration) as error:
+        print(f"guard: cannot monitor command: {error}", file=sys.stderr)
+        return 1
+    finally:
+        stop_child()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
