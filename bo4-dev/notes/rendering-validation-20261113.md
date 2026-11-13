@@ -1339,3 +1339,31 @@ to around 600 replacements and 0.8 GB per 120 epochs. Later sampled frames showe
 19 FPS with textured weapons, geometry, lighting, shadows and HUD. This is still
 below the playability target. The production build without diagnostic logging
 also passes all five runtime_image_views cases. Further optimization continues.
+
+A 12 GiB advertised VRAM budget measured 15.88 FPS versus 16.05 FPS at 6 GiB,
+with the aggregate 12,000 MiB guard unchanged. It did not establish a benefit,
+so subsequent runs returned to 6 GiB.
+
+Sparse backing allocations now have a bounded 128 MiB reuse pool keyed by exact
+allocation size. Memory enters the pool only through the existing deferred
+operation after the GPU timeline completes its unbinding submission. Live backing
+reference counts and original allocation sizes are tracked separately. Pool
+access is protected by a mutex, and excess allocations are freed normally.
+The original buffer_mapping_lifetimes homebrew checks twelve mapping lifetimes,
+all transformed output/source words and two guard regions per lifetime. It passes
+on both the saved pre-pool binary and the pool build. All sixteen selected probes
+pass at the default submission interval with no validation messages.
+
+The pool's first gameplay minute measured 16.23 FPS, which does not establish an
+FPS gain over 16.05. In the CPU profile, driver allocation/free samples fell from
+about 13.7% to 9.9%. At the end, the pool held 123.2 MiB in 98 allocations while
+8,418 backings remained live. The additional memory is bounded; the existing
+aggregate memory guard remains unchanged.
+
+A stress run submitting after every draw/dispatch passes fifteen probes with no
+validation messages. runtime_image_updates again fails only physical_alias,
+returning 0x3f400000 instead of 0x3f600000; its other phases, including remap_reuse,
+pass. This is the previously reproduced timing-dependent alias limitation.
+The next gameplay experiment uses the existing submit_draw_interval setting at
+32 while preserving resolution and shader settings. The original configuration
+is saved locally at out/performance/config-before-submission-tuning.json.
