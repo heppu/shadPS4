@@ -285,3 +285,21 @@ This fixes bound-buffer aliases, not arbitrary unbound pointer residency. The
 live configuration previously disabled DMA; live validation with it enabled is
 pending. Evidence: out/ship-fix/dynamic-scalar-{disabled,enabled,resident-enabled,
 fixed,buffer-regression}.log. Original sources accompany the fix.
+
+
+## Follow-up: DMA setting and cached shader compatibility
+
+An isolated cache seeded with DMA disabled is reused when DMA is enabled:
+preloaded=1 and all 64 dynamic sums remain wrong despite the resident-buffer fix.
+Shader metadata now records the DMA setting and rejects mismatches. Metadata
+version increases from 15 to 16. The same-version toggle test seeds a disabled
+cache, enables DMA (preloaded=0, PASS), repeats enabled (preloaded=1, PASS), then
+disables DMA (preloaded=0, the expected unsupported dynamic-read failure). All
+four runs have zero core/synchronization validation reports. Build/diff checks
+pass. This prevents old shaders from silently defeating a configuration change.
+
+The first live Voyage comparison had stale disabled-DMA shaders and still showed
+bright rectangular effect artifacts above the otherwise textured deck. It is
+not a valid enabled-DMA comparison. The cache-corrected live run is now pending.
+Evidence: out/ship-fix/dma-cache-{seed,toggle-baseline,seed-fixed,toggle-fixed,
+warm-fixed,reverse-fixed}.log and dma-voyage-first.png.
