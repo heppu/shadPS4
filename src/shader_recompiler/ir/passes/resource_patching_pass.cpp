@@ -123,7 +123,8 @@ public:
                    desc.table_offset_dw == existing.table_offset_dw &&
                    desc.table_size == existing.table_size &&
                    desc.table_type == existing.table_type && desc.is_array == existing.is_array &&
-                   (!desc.IsTable() || desc.is_depth == existing.is_depth) &&
+                   (!desc.IsTable() ||
+                    (desc.is_depth == existing.is_depth && desc.is_r128 == existing.is_r128)) &&
                    desc.mip_fallback_mode == existing.mip_fallback_mode &&
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
@@ -469,7 +470,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
                                          image_index.IsEmpty() ? zero : IR::U32{image_index},
                                          sampler_index.IsEmpty() ? zero : IR::U32{sampler_index}));
     if (image_res.IsTable() && image_res.table_type == AmdGpu::ImageType::Color2D &&
-        !image_res.is_depth && !inst_info.is_gather &&
+        !image_res.is_depth && !image_res.is_r128 && !inst_info.is_gather &&
         inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
         auto volume_res = image_res;
         volume_res.table_type = AmdGpu::ImageType::Color3D;

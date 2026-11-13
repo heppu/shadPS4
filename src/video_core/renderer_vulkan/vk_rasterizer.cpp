@@ -1494,11 +1494,14 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             image_table_views.assign(table.num_entries, vk::ImageView{});
             std::unordered_map<u64, vk::ImageView> depth_views;
             for (u32 i = 0; i < table.num_entries; ++i) {
-                AmdGpu::Image tsharp;
+                AmdGpu::Image tsharp{};
                 std::memcpy(&tsharp,
                             table.shadow.data() +
                                 (u64{i} * table.stride_dw + table.offset_dw) * sizeof(u32),
-                            sizeof(tsharp));
+                            table.is_r128 ? 16 : sizeof(tsharp));
+                if (table.is_r128) {
+                    tsharp.pitch = tsharp.width;
+                }
                 // The fractional minimum LOD fades streamed mips in and changes every frame.
                 tsharp.min_lod &= ~u64{0xFF};
                 tsharp.min_lod_warn = 0;
@@ -1604,7 +1607,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                table.stride_dw == image_desc.table_stride_dw &&
                table.offset_dw == image_desc.table_offset_dw &&
                table.num_entries == image_desc.table_size && table.type == image_desc.table_type &&
-               table.is_depth == image_desc.is_depth;
+               table.is_depth == image_desc.is_depth && table.is_r128 == image_desc.is_r128;
     });
     if (it == image_tables.end()) {
         it = image_tables.insert(image_tables.end(), ImageTable{});
@@ -1615,6 +1618,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->num_entries = image_desc.table_size;
         it->type = image_desc.table_type;
         it->is_depth = image_desc.is_depth;
+        it->is_r128 = image_desc.is_r128;
         const u64 shadow_size =
             (u64{it->num_entries} * it->stride_dw + it->offset_dw) * sizeof(u32) +
             sizeof(AmdGpu::Image);
@@ -1624,7 +1628,8 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
 
     const u64 gc_tick = TableEpoch();
     // Guests alternate between copies of a table, coming back to one means it was rewritten.
-    auto& last_table = last_image_tables[static_cast<size_t>(it->type) + (it->is_depth ? 16 : 0)];
+    auto& last_table = last_image_tables[static_cast<size_t>(it->type) + (it->is_depth ? 16 : 0) +
+                                         (it->is_r128 ? 32 : 0)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
     if (it->is_depth || it->current_set < 0 || it->checked_tick != gc_tick ||
         it->checked_generation != table_cache_generation || is_switched) {
