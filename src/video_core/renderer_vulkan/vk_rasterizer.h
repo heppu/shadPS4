@@ -252,7 +252,7 @@ private:
     };
     std::unordered_map<u64, TableKey> table_keys;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
-    std::array<u32, 2> last_image_tables{};
+    std::array<u32, 16> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
