@@ -521,31 +521,40 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     inst.SetArg(0, ir.IndexedImageHandle(ir.Imm32(binding),
                                          image_index.IsEmpty() ? zero : IR::U32{image_index},
                                          sampler_index.IsEmpty() ? zero : IR::U32{sampler_index}));
-    if (image_res.IsTable() && image_res.table_type == AmdGpu::ImageType::Color2D &&
-        !image_res.is_depth && !image_res.is_r128 && !inst_info.is_gather &&
+    const bool cube_table = image_res.table_type == AmdGpu::ImageType::Cube;
+    const bool volume_table = image_res.table_type == AmdGpu::ImageType::Color2D &&
+                              !image_res.is_depth && !image_res.is_r128 && !inst_info.is_gather;
+    if (image_res.IsTable() && (cube_table || volume_table) &&
         inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
-        auto volume_res = image_res;
-        volume_res.table_type = AmdGpu::ImageType::Color3D;
-        const u32 volume_binding = descriptors.Add(volume_res) | (binding & 0xffff0000U);
-        const auto volume_handle =
-            ir.IndexedImageHandle(ir.Imm32(volume_binding), IR::U32{image_index},
+        auto alternate_res = image_res;
+        alternate_res.table_type = cube_table
+                                       ? (image_res.is_array ? AmdGpu::ImageType::Color2DArray
+                                                             : AmdGpu::ImageType::Color2D)
+                                       : AmdGpu::ImageType::Color3D;
+        const u32 alternate_binding = descriptors.Add(alternate_res) | (binding & 0xffff0000U);
+        const auto alternate_handle =
+            ir.IndexedImageHandle(ir.Imm32(alternate_binding), IR::U32{image_index},
                                   sampler_index.IsEmpty() ? zero : IR::U32{sampler_index});
-        const auto planar = ir.ImageSampleRaw(inst.Arg(0), inst.Arg(1), inst.Arg(2), inst.Arg(3),
-                                              inst.Arg(4), inst.Arg(5), inst_info);
-        const auto volume = ir.ImageSampleRaw(volume_handle, inst.Arg(1), inst.Arg(2), inst.Arg(3),
-                                              inst.Arg(4), inst.Arg(5), inst_info);
+        const auto primary = ir.ImageSampleRaw(inst.Arg(0), inst.Arg(1), inst.Arg(2), inst.Arg(3),
+                                               inst.Arg(4), inst.Arg(5), inst_info);
+        const auto alternate = ir.ImageSampleRaw(alternate_handle, inst.Arg(1), inst.Arg(2),
+                                                 inst.Arg(3), inst.Arg(4), inst.Arg(5), inst_info);
         const auto type =
             ir.BitFieldExtract(IR::U32{resource.sharps[0].dwords[3]}, ir.Imm32(28U), ir.Imm32(4U));
-        const auto is_volume = ir.IEqual(type, ir.Imm32(u32(AmdGpu::ImageType::Color3D)));
+        const auto selected_type =
+            cube_table ? AmdGpu::ImageType::Cube : AmdGpu::ImageType::Color3D;
+        const auto matches = ir.IEqual(type, ir.Imm32(u32(selected_type)));
+        const auto matching = cube_table ? primary : alternate;
+        const auto other = cube_table ? alternate : primary;
         std::array<IR::Value, 4> components;
         for (u32 component = 0; component < components.size(); ++component) {
-            components[component] = ir.Select(is_volume, ir.CompositeExtract(volume, component),
-                                              ir.CompositeExtract(planar, component));
+            components[component] = ir.Select(matches, ir.CompositeExtract(matching, component),
+                                              ir.CompositeExtract(other, component));
         }
         inst.ReplaceUsesWith(
             ir.CompositeConstruct(components[0], components[1], components[2], components[3]));
-        extra_images.push_back(planar.Inst());
-        extra_images.push_back(volume.Inst());
+        extra_images.push_back(primary.Inst());
+        extra_images.push_back(alternate.Inst());
     }
 }
 

@@ -827,3 +827,31 @@ SPIR-V modules validate (load-game-spirv-validation.log). Screenshot:
 rendering-tag-typed-loads-20261113.png. Gameover/downed desaturation is excluded
 from material comparison. Full-match coverage, the earlier transient black
 post-Ancient clothing, and higher-MRT SRC1 semantics remain unverified.
+
+## Mixed planar/cube shadow tables (follow-up)
+
+The black after-action-report clothing is reproducible, not yet merely an
+unverified transient. A bounded 1.94 GB RenderDoc capture was taken with RPCS3
+left running. Clothing albedo and normals are present in the G-buffer. At
+compute event 2955, a clothing pixel falls to approximately
+(0.000446, 0.000519, 0.000717). Descriptor inspection shows that 2D D16 shadow
+maps occupy slots accessed through a table inferred to contain cubes, so those
+slots are null. Shared cube-coordinate ancestry made UsesCubeFaceMath classify
+planar shadow sampling as cube sampling. A diagnostic replay correction uses
+the existing 2D shadow table and planar coordinates: the same pixel becomes
+(0.154297, 0.199219, 0.367188), and the coat, belt and trousers become lit again.
+This replay experiment is evidence, not a shipped shader override.
+
+The generic fix retains cube and planar variants and chooses their sampled
+result from the runtime descriptor type. Array instructions retain array
+coordinates in the planar variant. Binary cache version is now 28; metadata
+layout remains 17. The original runtime_shadow_dimensions homebrew shares
+cube-face calculations between planar and cube descriptors, varies depth
+spatially and by face/layer, and swaps a runtime table in place. Its baseline
+passes eight direct controls but has 128 runtime mismatches. The fixed build
+passes all 12 cases with zero VUID/SYNC messages. Six neighboring probes also
+pass: runtime_depth_tables, runtime_image_dimensions, runtime_compact_images,
+runtime_image_loads, runtime_image_queries, runtime_image_identity. Build:
+shadow-fix-build.log (BUILD_EXIT=0). Evidence: shadow-baseline.log,
+shadow-fixed.log, shadow-regressions.result, black-replay/server.log.
+Fresh-game visual confirmation is in progress; no physical PS4 result claimed.
