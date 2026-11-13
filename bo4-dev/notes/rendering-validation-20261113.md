@@ -1046,3 +1046,22 @@ owned sleeping child. Python syntax and shell syntax checks pass. A detached IX
 run confirms watchdog PID 7 remains under docker-init after the launcher exits,
 with fresh memory samples. RPCS3 PID 32412 remains running. The renderer binary
 is unchanged; remaining map checks continue with a 4 GiB override.
+
+
+IX follow-up on the same renderer completes two gameplay/report passes under
+the in-container guard. A sunlit arena frame shows textured stone, painted
+banners, crowd geometry, directional shadows, wood grain and reflective weapon
+metal. The initial gate close-up was movement across the arena, not missing
+world rendering; sequence frame 15 preserves the open arena view. Report
+Scarlett retains armor, cloth, skin and continuous hair. The second report
+records 0 kills, 500 points, 1m11s and round 1; no completed round is claimed.
+Gameplay samples are 8–10 FPS, report 17 FPS. Screenshots:
+rendering-ix-exec-fixed-20261113.png and
+rendering-ix-report-exec-fixed-20261113.png.
+
+Preserved guarded-ix-game.log contains zero renderer errors and critical
+messages (game Vulkan validation remains off). The detached watchdog remains
+alive for the entire roughly 12-minute run, through repeated level/report/lobby
+transitions; guarded-ix-memory.log has fresh samples up to the intentional stop
+and no threshold event. RPCS3 remains running. Higher-MRT blend semantics and
+full-match coverage remain unresolved.
