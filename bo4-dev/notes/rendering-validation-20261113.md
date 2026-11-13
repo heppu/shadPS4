@@ -340,3 +340,43 @@ Saved image: rendering-voyage-cache-fixes-20261113.png. Local evidence:
 out/dma-voyage-live{1,2,3}.png, dma-voyage-settled.png and
 out/ship-fix/dma-visual-voyage.log. Next: live validation of the depth ordering
 change and investigation of presentation/blend diagnostics.
+
+
+## Follow-up: runtime image first-use correctness
+
+The runtime descriptor-table resolver silently limited new image resolutions to
+48 per table epoch. Entries beyond that limit returned a zero descriptor until
+later frames, even when the shader needed them immediately. Remove that limit;
+all valid entries needed by the table must resolve before dispatch/draw.
+
+Original runtime_image_first_use homebrew samples 64 distinct textures in its
+first dispatch. Baseline 57cd101e returns zero for textures 48 through 63 (1,024
+wrong output words). The fix passes all 4,096 output words and 16 guards, with
+zero core/synchronization validation reports. Runtime image updates and identity
+regressions also pass with zero reports. Build succeeds. Live memory/visual
+validation of this fix is in progress. No physical-console result is claimed.
+Evidence: out/ship-fix/first-use-{baseline,fixed,updates-regression,
+identity-regression}.log. Original homebrew sources accompany the change.
+
+The separate 3d165abf live validation run reaches Voyage gameplay with textured
+deck, ice and hull, and reflective weapon surfaces. It has no depth-image
+WRITE-AFTER-WRITE report. WRITE-AFTER-PRESENT and higher-MRT SRC1 errors remain.
+Evidence: out/depth-order-voyage-first.png and out/ship-fix/depth-order-voyage.log.
+
+
+First-use live follow-up: IX reaches the arena with detailed stone, wood, cloth,
+weapon metal and skin. A settled arena view reports 21 FPS; this is a single
+scene sample, not a performance benchmark. GPU use stays below the guard at
+about 9.5 GiB at gameplay entry. Saved image:
+rendering-ix-first-use-20261113.png. Local evidence:
+out/first-use-ix-{first,arena}.png and out/ship-fix/first-use-ix-gameplay.log.
+
+One earlier startup stayed on the loading screen for several minutes; the repeat
+with identical code reached title, lobby and gameplay normally. Preserve its
+log/stacks as first-use-loading-delay.log and first-use-startup-stacks.log rather
+than claiming startup stability. The startup thread sample waited on a video
+buffer label; no texture-resolution stall was observed.
+
+The presentation warning also occurs with upstream Vulkan-ValidationLayers
+37ec2baf9aac8c0f55fe2b9beec1d818b70d7841 (API 1.4.368) in the mip/subrectangle
+probe. Updating the validator alone does not resolve it. Investigation continues.
