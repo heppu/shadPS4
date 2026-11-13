@@ -1,6 +1,6 @@
 # Black Ops 4 dev loop for shadPS4
 
-Scripts used to build, run and debug shadPS4 with Call of Duty: Black Ops 4 (CUSA11100) on a host that cannot build the emulator natively. Everything runs in a docker image with a headless sway session, so nothing opens on the desktop. Emulator changes live on the `bo4` branch.
+Scripts used to build, run and debug shadPS4 with Call of Duty: Black Ops 4 (CUSA11100) on a host that cannot build the emulator natively. Everything runs in a docker image with a headless sway session, so nothing opens on the desktop. Emulator changes live on the `bo4` and `bo4-tables` branches.
 
 Paths inside the scripts point at the machine they were written on (`/mnt/games/PS4/bo4-dev`, the fork checkout under `~/code`). Adjust them before use.
 
@@ -17,3 +17,11 @@ Paths inside the scripts point at the machine they were written on (`/mnt/games/
 - `bo4-dev/patches`: emulator patch file that opens the offline mode cards when the downloaded playlist data is missing. Copy it to `user/patches/local` in the emulator user folder.
 
 Game data, the emulator user folder, build output and logs are not part of this branch.
+
+## Runtime buffer-table reproducer
+
+`bo4-dev/hardware-tests/tests/runtime_buffer_table` contains an OpenOrbis
+reproducer with original GFX7 assembly. It checks runtime-selected buffer pairs,
+different strides, out-of-range accesses, an empty source, and guard regions.
+See its README for build and run instructions. It passes on the modified
+emulator; physical PS4 validation remains outstanding.
