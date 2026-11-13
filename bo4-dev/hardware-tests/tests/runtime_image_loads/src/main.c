@@ -53,6 +53,8 @@ int main(void) {
         shader(&arena, array_shader, sizeof(array_shader), 8)};
     GnmCsStageRegisters writer = shader(&arena, write_shader, sizeof(write_shader), 9);
     GnmTexture textures[9] = {0};
+    uint32_t* backing[9];
+    uint64_t backing_bytes[9];
     const GnmDataFormat formats[] = {
         GNM_FMT_R32_FLOAT,
         GNM_DATA_FORMAT_INIT(GNM_IMG_DATA_FORMAT_32, GNM_IMG_NUM_FORMAT_UINT, GNM_CHAN_X,
@@ -82,6 +84,8 @@ int main(void) {
         uint32_t* data = st_arena_alloc(&arena, bytes, 65536);
         if (!data)
             return st_fail("reason=texture_memory");
+        backing[t] = data;
+        backing_bytes[t] = bytes;
         st_fill_words(data, bytes / 4, values[t % 3]);
         sceGnmTexSetBaseAddress(&textures[t], data);
         if (t >= 6)
@@ -93,12 +97,12 @@ int main(void) {
     result.stride = 4;
     result.numrecords = 128;
     unsigned failures = 0;
-    for (unsigned kind = 0; kind < 4; ++kind)
+    for (unsigned kind = 0; kind < 5; ++kind)
         for (unsigned dynamic = 0; dynamic < 2; ++dynamic)
             for (unsigned phase = 0; phase < 3; ++phase) {
-                if (kind == 3 && !dynamic)
+                if (kind >= 3 && !dynamic)
                     continue;
-                const unsigned base = kind == 3 ? 0 : kind * 3;
+                const unsigned base = kind >= 3 ? 0 : kind * 3;
                 uint32_t expected_values[3];
                 memcpy(expected_values, values, sizeof(values));
                 if (kind == 3) {
@@ -115,6 +119,12 @@ int main(void) {
                         st_dcb_barrier(&write, 0);
                         if (!submit_and_wait(&write))
                             return st_fail("reason=gpu_write");
+                    }
+                }
+                if (kind == 4) {
+                    for (unsigned t = 0; t < 3; ++t) {
+                        expected_values[t] = values[(t + phase + 2) % 3];
+                        st_fill_words(backing[t], backing_bytes[t] / 4, expected_values[t]);
                     }
                 }
                 descriptors[0] = textures[base + phase];
@@ -156,7 +166,7 @@ int main(void) {
             }
     if (failures)
         return st_fail("mismatches=%u", failures);
-    st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=12 "
-                           "gpu_updates=3 table_rewrite=1 guards=1");
+    st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=15 "
+                           "gpu_updates=3 cpu_updates=3 table_rewrite=1 guards=1");
     return 0;
 }
