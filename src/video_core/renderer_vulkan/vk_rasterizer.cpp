@@ -804,11 +804,60 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Bindings& binding,
                              Shader::PushData& push_data) {
     const u64 alignment = instance.StorageMinAlignment();
+    boost::container::small_vector<std::vector<AmdGpu::Buffer>, 2> table_entries;
+    for (const auto& desc : stage.buffers) {
+        if (!desc.IsTable()) {
+            continue;
+        }
+        auto& entries = table_entries.emplace_back();
+        const auto table = desc.GetTableSharp(stage);
+        if (!table.Valid() || !table.base_address ||
+            !memory->IsValidGpuMapping(table.base_address, table.GetSize())) {
+            continue;
+        }
+        entries.reserve(desc.NumTableEntries(table));
+        for (u32 index = 0; index < desc.NumTableEntries(table); ++index) {
+            entries.push_back(desc.GetTableEntry(table, index));
+        }
+    }
+    u32 table_index{};
     for (const auto& desc : stage.buffers) {
         const auto src_access =
             vk::AccessFlagBits2::eShaderRead |
             (desc.is_written ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone);
-        if (desc.IsSpecial()) {
+        if (desc.IsTable()) {
+            const auto& sharps = table_entries[table_index++];
+            const u32 count = static_cast<u32>(sharps.size());
+            std::vector<std::array<u32, 4>> entries(count + 1);
+            entries[0][0] = count;
+            for (u32 i = 0; i < count; ++i) {
+                const auto& sharp = sharps[i];
+                if (!sharp.Valid() || !sharp.base_address || !sharp.GetSize() ||
+                    !memory->IsValidGpuMapping(sharp.base_address, 0)) {
+                    continue;
+                }
+                const u64 size = memory->ClampRangeSize(sharp.base_address, sharp.GetSize());
+                if (!size || !memory->IsValidGpuMapping(sharp.base_address, size)) {
+                    continue;
+                }
+                const auto flags = desc.is_written ? VideoCore::ObtainBufferFlags::IsWritten
+                                                   : VideoCore::ObtainBufferFlags{};
+                const auto [buffer, offset] =
+                    buffer_cache.ObtainBuffer(sharp.base_address, size, flags);
+                const u64 address = buffer->BufferDeviceAddress() + offset;
+                entries[i + 1] = {static_cast<u32>(address), static_cast<u32>(address >> 32),
+                                  static_cast<u32>(size), 0};
+                bound_buffers.emplace_back(buffer, offset, size, src_access);
+                needs_barrier |= runtime.IsBufferAccessed(buffer, offset, size, desc.is_written);
+                if (desc.is_written) {
+                    texture_cache.InvalidateMemoryFromGPU(sharp.base_address, size);
+                }
+            }
+            auto& stream = buffer_cache.GetStreamBuffer();
+            const u64 size = entries.size() * sizeof(entries[0]);
+            const u64 offset = stream.Copy(entries.data(), size, alignment);
+            buffer_infos.emplace_back(stream.Handle(), offset, size);
+        } else if (desc.IsSpecial()) {
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
                 const auto* gds_buf = buffer_cache.GetGdsBuffer();
                 buffer_infos.emplace_back(gds_buf->Handle(), 0, gds_buf->SizeBytes());

@@ -100,7 +100,11 @@ public:
 
     u32 Add(const BufferResource& desc) {
         const u32 index{Add(buffer_resources, desc, [&desc](const auto& existing) {
-            return desc.sharp_fetch == existing.sharp_fetch && desc.post_op == existing.post_op &&
+            return desc.sharp_fetch == existing.sharp_fetch &&
+                   desc.table_fetch == existing.table_fetch &&
+                   desc.table_stride_dw == existing.table_stride_dw &&
+                   desc.table_offset_dw == existing.table_offset_dw &&
+                   desc.post_op == existing.post_op &&
                    desc.post_op_dw1_mask == existing.post_op_dw1_mask &&
                    desc.buffer_type == existing.buffer_type;
         })};
@@ -218,6 +222,48 @@ SharpFetch<T> ConstructSharpFetch(const SharpReference& sharp) {
 void PatchBufferSharp(const ResourceDiscovery& resource, Info& info, Descriptors& descriptors,
                       const Profile& profile) {
     IR::Inst& inst = *resource.user;
+
+    const auto& table = resource.tables[0];
+    if (!table.index.IsEmpty()) {
+        const u32 binding = descriptors.Add(BufferResource{
+            .table_fetch = ConstructSharpFetch<AmdGpu::Buffer>(table.sharp),
+            .table_stride_dw = table.stride_dw,
+            .table_offset_dw = table.offset_dw,
+            .used_types = IR::Type::U32,
+            .buffer_type = BufferType::Guest,
+            .is_written = IsBufferStore(inst),
+        });
+        IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
+        const auto flags = inst.Flags<IR::BufferInstInfo>();
+        const IR::U32 dw1{resource.sharps[0].dwords[1]};
+        const IR::U32 dw3{resource.sharps[0].dwords[3]};
+        const auto extract = [&](IR::U32 word, u32 offset, u32 bits) {
+            return ir.BitFieldExtract(word, ir.Imm32(offset), ir.Imm32(bits));
+        };
+        const auto stride = extract(dw1, 16, 14);
+        auto index = flags.index_enable ? IR::GetBufferIndexArg(&inst) : ir.Imm32(0U);
+        const auto add_tid = ir.INotEqual(extract(dw3, 23, 1), ir.Imm32(0U));
+        index = ir.IAdd(index, IR::U32{ir.Select(add_tid, ir.LaneId(), ir.Imm32(0U))});
+        auto offset = ir.IAdd(IR::GetBufferSOffsetArg(&inst),
+                              ir.Imm32(static_cast<u32>(flags.inst_offset.Value())));
+        if (flags.voffset_enable) {
+            offset = ir.IAdd(offset, IR::GetBufferVOffsetArg(&inst));
+        }
+        const auto linear = ir.IAdd(ir.IMul(index, stride), offset);
+        const auto index_stride = ir.ShiftLeftLogical(ir.Imm32(8U), extract(dw3, 21, 2));
+        const auto element_size = ir.ShiftLeftLogical(ir.Imm32(2U), extract(dw3, 19, 2));
+        const auto swizzled =
+            ir.IAdd(ir.IMul(ir.IAdd(ir.IMul(ir.IDiv(index, index_stride), stride),
+                                    ir.IMul(ir.IDiv(offset, element_size), element_size)),
+                            index_stride),
+                    ir.IAdd(ir.IMul(ir.IMod(index, index_stride), element_size),
+                            ir.IMod(offset, element_size)));
+        const auto swizzle = ir.INotEqual(extract(dw1, 31, 1), ir.Imm32(0U));
+        const IR::U32 address{ir.Select(swizzle, swizzled, linear)};
+        inst.SetArg(1, ir.ShiftRightLogical(address, ir.Imm32(2U)));
+        inst.SetArg(0, ir.IndexedBufferHandle(ir.Imm32(binding), IR::U32{table.index}));
+        return;
+    }
 
     const u32 buffer_binding = descriptors.Add(BufferResource{
         .sharp_fetch = ConstructSharpFetch<AmdGpu::Buffer>(resource.sharps[0]),
@@ -719,6 +765,9 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
 
 void PatchBufferArgs(IR::Inst& inst, Info& info) {
     const auto handle = inst.Arg(0);
+    if (!handle.IsImmediate()) {
+        return;
+    }
     const auto buffer_res = info.buffers[handle.U32()];
     const auto buffer = buffer_res.GetSharp(info);
 

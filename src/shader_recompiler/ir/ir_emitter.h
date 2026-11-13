@@ -382,6 +382,7 @@ public:
                                            TextureInstInfo info);
 
     [[nodiscard]] Value ImageHandle(const Value& tsharp_low, const Value& tsharp_high);
+    [[nodiscard]] Value IndexedBufferHandle(const U32& binding, const U32& index);
     [[nodiscard]] Value IndexedImageHandle(const U32& binding, const U32& image_index,
                                            const U32& sampler_index);
 

@@ -46,6 +46,10 @@ static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribu
     }
 }
 
+Id EmitIndexedBufferHandle(EmitContext& ctx, u32 binding, Id index) {
+    return index;
+}
+
 Id EmitGetUserData(EmitContext& ctx, IR::ScalarReg reg) {
     const Id ud_reg{ctx.EmitFlatbufferLoad(ctx.ConstU32(static_cast<u32>(reg)))};
     ctx.Name(ud_reg, fmt::format("ud_{}", u32(reg)));
@@ -389,6 +393,22 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
 template <u32 N, PointerType alias>
 static Id EmitLoadBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {
     const auto& spv_buffer = ctx.buffers[handle];
+    if (ctx.info.buffers[handle].IsTable()) {
+        const auto index = ctx.Def(inst->Arg(0));
+        const auto& types = alias == PointerType::U32 ? ctx.U32 : ctx.F32;
+        boost::container::static_vector<Id, N> values;
+        for (u32 i = 0; i < N; ++i) {
+            const auto byte_offset = ctx.OpShiftLeftLogical(
+                ctx.U32[1], ctx.OpIAdd(ctx.U32[1], address, ctx.ConstU32(i)), ctx.ConstU32(2U));
+            auto value = ctx.OpFunctionCall(ctx.U32[1], spv_buffer.table_load, index, byte_offset,
+                                            ctx.u32_zero_value);
+            if constexpr (alias == PointerType::F32) {
+                value = ctx.OpBitcast(ctx.F32[1], value);
+            }
+            values.push_back(value);
+        }
+        return N == 1 ? values[0] : ctx.OpCompositeConstruct(types[N], values);
+    }
     if (const Id offset = spv_buffer.Offset(PointerSize::B32); Sirit::ValidId(offset)) {
         address = ctx.OpIAdd(ctx.U32[1], address, offset);
     }
@@ -480,6 +500,20 @@ template <u32 N, PointerType alias>
 static void EmitStoreBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address,
                                  Id value) {
     const auto& spv_buffer = ctx.buffers[handle];
+    if (ctx.info.buffers[handle].IsTable()) {
+        const auto index = ctx.Def(inst->Arg(0));
+        const auto& types = alias == PointerType::U32 ? ctx.U32 : ctx.F32;
+        for (u32 i = 0; i < N; ++i) {
+            const auto byte_offset = ctx.OpShiftLeftLogical(
+                ctx.U32[1], ctx.OpIAdd(ctx.U32[1], address, ctx.ConstU32(i)), ctx.ConstU32(2U));
+            auto component = N == 1 ? value : ctx.OpCompositeExtract(types[1], value, i);
+            if constexpr (alias == PointerType::F32) {
+                component = ctx.OpBitcast(ctx.U32[1], component);
+            }
+            ctx.OpFunctionCall(ctx.U32[1], spv_buffer.table_store, index, byte_offset, component);
+        }
+        return;
+    }
     if (const Id offset = spv_buffer.Offset(PointerSize::B32); Sirit::ValidId(offset)) {
         address = ctx.OpIAdd(ctx.U32[1], address, offset);
     }

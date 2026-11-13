@@ -59,6 +59,10 @@ struct InfoPersistent {
     bool has_bitwise_xor{};
     bool uses_dma{};
 
+    bool UsesBufferTables() const {
+        return std::ranges::any_of(buffers, &BufferResource::IsTable);
+    }
+
     InfoPersistent() = default;
     InfoPersistent(HwStage hw_stage_, SwStage sw_stage_, u64 pgm_hash_)
         : hw_stage{hw_stage_}, sw_stage{sw_stage_}, pgm_hash{pgm_hash_} {}

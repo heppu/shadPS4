@@ -72,7 +72,7 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
                          Bindings& binding_)
     : Sirit::Module(profile_.supported_spirv), info{info_}, runtime_info{runtime_info_},
       profile{profile_}, hw_stage{info.hw_stage}, sw_stage{info.sw_stage}, binding{binding_} {
-    if (info.uses_dma) {
+    if (info.uses_dma || info.UsesBufferTables()) {
         SetMemoryModel(spv::AddressingModel::PhysicalStorageBuffer64, spv::MemoryModel::GLSL450);
     } else {
         SetMemoryModel(spv::AddressingModel::Logical, spv::MemoryModel::GLSL450);
@@ -173,7 +173,7 @@ void EmitContext::DefineArithmeticTypes() {
     if (info.uses_fp64) {
         frexp_result_f64 = Name(TypeStruct(F64[1], S32[1]), "frexp_result_f64");
     }
-    if (info.uses_dma) {
+    if (info.uses_dma || info.UsesBufferTables()) {
         physical_pointer_type_u32 = TypePointer(spv::StorageClass::PhysicalStorageBuffer, U32[1]);
     }
 }
@@ -867,6 +867,12 @@ void EmitContext::DefineBuffers() {
 
         // Define aliases depending on the shader usage.
         auto& spv_buffer = buffers.emplace_back(binding.buffer++, desc.buffer_type);
+        if (desc.IsTable()) {
+            spv_buffer.Alias(PointerType::U32) =
+                DefineBuffer(false, false, 2, BufferType::Guest, U32[1]);
+            ++binding.unified;
+            continue;
+        }
         if (True(desc.used_types & IR::Type::U64)) {
             spv_buffer.Alias(PointerType::U64) =
                 DefineBuffer(desc.is_written, is_coherent, 3, desc.buffer_type, U64);
@@ -1331,7 +1337,62 @@ Id EmitContext::DefineReadConst(bool dynamic) {
     return func;
 }
 
+Id EmitContext::DefineBufferTableAccess(u32 handle, bool write) {
+    const auto function = OpFunction(U32[1], spv::FunctionControlMask::MaskNone,
+                                     TypeFunction(U32[1], U32[1], U32[1], U32[1]));
+    const auto index = OpFunctionParameter(U32[1]);
+    const auto offset = OpFunctionParameter(U32[1]);
+    const auto value = OpFunctionParameter(U32[1]);
+    Name(function, fmt::format("buffer_table_{}_{}", write ? "store" : "load", handle));
+    const auto start = OpLabel();
+    AddLabel(start);
+    const auto [table, pointer_type] = buffers[handle].Alias(PointerType::U32);
+    const auto load = [&](Id word) {
+        return OpLoad(U32[1], OpAccessChain(pointer_type, table, u32_zero_value, word));
+    };
+    const auto count = load(u32_zero_value);
+    const auto in_table = OpULessThan(U1[1], index, count);
+    const auto entry = OpShiftLeftLogical(
+        U32[1], OpSelect(U32[1], in_table, OpIAdd(U32[1], index, u32_one_value), u32_zero_value),
+        ConstU32(2U));
+    const auto lo = load(entry);
+    const auto hi = load(OpIAdd(U32[1], entry, u32_one_value));
+    const auto size = load(OpIAdd(U32[1], entry, ConstU32(2U)));
+    const auto base = OpBitcast(U64, OpCompositeConstruct(U32[2], lo, hi));
+    const auto available =
+        OpLogicalAnd(U1[1], OpULessThan(U1[1], offset, size),
+                     OpUGreaterThanEqual(U1[1], OpISub(U32[1], size, offset), ConstU32(4U)));
+    const auto valid = OpLogicalAnd(
+        U1[1], in_table, OpLogicalAnd(U1[1], available, OpINotEqual(U1[1], base, u64_zero_value)));
+    const auto access = OpLabel();
+    const auto merge = OpLabel();
+    OpSelectionMerge(merge, spv::SelectionControlMask::MaskNone);
+    OpBranchConditional(valid, access, merge);
+    AddLabel(access);
+    const auto address = OpIAdd(U64, base, OpUConvert(U64, offset));
+    const auto pointer = OpConvertUToPtr(physical_pointer_type_u32, address);
+    Id result = u32_zero_value;
+    if (write) {
+        OpStore(pointer, value, spv::MemoryAccessMask::Aligned, 4u);
+    } else {
+        result = OpLoad(U32[1], pointer, spv::MemoryAccessMask::Aligned, 4u);
+    }
+    OpBranch(merge);
+    AddLabel(merge);
+    OpReturnValue(OpPhi(U32[1], result, access, u32_zero_value, start));
+    OpFunctionEnd();
+    return function;
+}
+
 void EmitContext::DefineFunctions() {
+    for (u32 i = 0; i < info.buffers.size(); ++i) {
+        if (info.buffers[i].IsTable()) {
+            buffers[i].table_load = DefineBufferTableAccess(i, false);
+            if (info.buffers[i].is_written) {
+                buffers[i].table_store = DefineBufferTableAccess(i, true);
+            }
+        }
+    }
     if (info.uses_pack_10_11_11) {
         f32_to_uf11 = DefineFloat32ToUfloatM5(6, "f32_to_uf11");
         f32_to_uf10 = DefineFloat32ToUfloatM5(5, "f32_to_uf10");
