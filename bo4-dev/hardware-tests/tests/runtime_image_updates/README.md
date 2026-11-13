@@ -31,3 +31,14 @@ memory at the same virtual addresses, and gives the new memory different pixels.
 It also overwrites the still-mapped old physical aliases with another pattern.
 Sampling must use the replacement memory, with no stale GPU backing or old-alias
 contents leaking across the mapping lifetime.
+
+The per-image revision follow-up inserts `cpu_update_one` before the original
+CPU update case. It overwrites only the first texture and checks that the second
+still contains its initial pixels. Both this case and the following two-texture
+update execute before SubmitDone, with the descriptor table unchanged.
+
+The remap-dependency follow-up adds an unrelated mapping retirement and then
+replaces the descriptor table's own mapping at the same virtual address. The
+replacement reverses the two descriptors while keeping the table buffer address
+and size unchanged. Both cases run without another SubmitDone; their outputs and
+guards are checked alongside the existing texture-data remap case.
