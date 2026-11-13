@@ -897,3 +897,63 @@ isolated sparse timeline presentation validation issue, not a clean sync log.
 No shader/resource sync hazards appear. Logs: scalar-baseline2.log,
 scalar-fixed.log, scalar-fix-build.log, scalar-regressions.result. No physical PS4
 result is claimed. RPCS3 PID 32412 remains running; probes used a 2 GiB override.
+
+Fresh-game confirmation on 397e8719: Tag der Toten renders textured snow, wood,
+zombie skin/clothing, reflective weapon metal and muzzle flash from several
+viewpoints. One headshot kill is recorded (620 points, 1m19s in game, round 1;
+no completed round claimed). The report screen now has continuous hair coverage
+in consecutive settled frames, replacing the visibly broken speckled patches
+of rendering-report-shadow-fixed-20261113.png. Clothing remains lit/textured.
+Return to lobby and change to the Voyage character retain these results.
+Screenshots: rendering-report-scalar-fixed-20261113.png,
+rendering-tag-scalar-fixed-20261113.png,
+rendering-tag-combat-scalar-fixed-20261113.png. The run has zero renderer errors
+or critical messages; unrelated HLE stubs remain, and game Vulkan validation
+is disabled. Cache audit: 1,165 records across all five encountered stages,
+zero invalid discoveries, zero skipped records. All 2,663 dumped SPIR-V modules
+validate, including older dumps; this is not an all-shader visual oracle.
+Local evidence: scalar-tag-game.log, scalar-all-stages-audit.json,
+scalar-shader-validation.json. The shared original-homebrew bundle now has
+21 ELFs including scalar_mask_flags. RPCS3 remains running. Tag gameplay is
+about 4–6 FPS and report/lobby about 12–13 FPS. Voyage regression is in progress.
+
+## EXEC-aware first-lane selection
+
+The following Voyage load exposed a second shader bug after the SCC correction.
+The first run reported device loss with an innocent-context message; the kernel
+attributed its ring timeout to the presentation thread. A bounded diagnostic
+run with RADV_DEBUG=hang,noumr reproduced the failure and isolated compute shader
+376efabf, dispatch 6x1x1, immediately after trace point 22. The dumped SPIR-V
+exactly matches cs_0x00000000376efabf_0.spv (SHA256
+3d7ffcf7988caeed994c6650a41a3c3fa55cdfd1a107e10e5b5c810ff64e57c6).
+The second kernel timeout names GpuComm. RPCS3 PID 32412 remains alive.
+
+A loop removes processed lanes from guest EXEC, then V_READFIRSTLANE chooses
+the next key. The old host BroadcastFirst still selects the first physically
+active Vulkan lane, including an already processed lane. With correct wave-wide
+SCC, the remaining mask never empties and the loop cannot progress. The previous
+per-lane SCC accidentally hid this read-first-lane bug. The generic fix carries
+the guest EXEC ballot through ReadFirstLane IR and broadcasts from its first
+set bit, with lane zero for an empty mask, as documented by AMD. No shader
+identifiers or game-specific overrides are included. Binary cache version 30
+invalidates the old lowering; metadata remains 17.
+
+Original readfirstlane_exec homebrew checks ten direct masks and forty grouped
+loops, including lane 63 and empty EXEC, exact iteration counts, remaining masks
+and output guards. A 65-iteration bound prevents the faulty baseline from
+hanging the GPU. Baseline 397e8719: 3,908 mismatched words; sparse-mask loops hit
+the bound. Fixed: all 50 cases pass. Both report zero VUIDs and three instances
+of the previously isolated WRITE_AFTER_PRESENT diagnostic. Build succeeds.
+Live Voyage verification and neighboring regressions are in progress.
+Local evidence: readfirst-{baseline,fixed,fix-build}.log,
+scalar-voyage-hang{,-traced}.log, scalar-gpu-fault{,2}.log, and
+driver-home/radv_dumps_35_2026.11.13_18.11.52/. Driver tracing and validation
+settings were restored after the diagnostic run.
+
+Final incremental build and repeated readfirstlane_exec pass. Ten neighboring
+probes all pass: scalar_mask_flags, dynamic_scalar_reads, runtime_buffer_table,
+runtime_shadow_dimensions, runtime_depth_tables, runtime_image_dimensions,
+runtime_compact_images, runtime_image_loads, runtime_image_queries,
+runtime_image_identity. No VUIDs are reported; intermittent
+WRITE_AFTER_PRESENT diagnostics remain recorded in the individual logs.
+The shared homebrew bundle now includes 22 ELFs. Game confirmation follows.
