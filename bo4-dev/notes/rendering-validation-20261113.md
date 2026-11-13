@@ -1367,3 +1367,30 @@ pass. This is the previously reproduced timing-dependent alias limitation.
 The next gameplay experiment uses the existing submit_draw_interval setting at
 32 while preserving resolution and shader settings. The original configuration
 is saved locally at out/performance/config-before-submission-tuning.json.
+
+### Incremental image-table refresh (b21043ef follow-up)
+
+Runtime image-load tables now preserve entries previously resolved to immutable
+textures within the same frame and cache generations. Mutable images still update
+on every use. Descriptor bytes are checked as before; CPU update, image-state,
+registration, mapping and frame changes force a complete refresh. A retry after
+content ownership changes also refreshes every entry.
+
+The same Tag der Toten opening-minute script measured 18.00 FPS versus 16.23 for
+the allocation-pool run. Rendering-thread CPU was 63.4%, GPU busy averaged 45.8%.
+This is not a controlled identical-scene comparison: characters and downed states
+vary. The final timed screenshot remained in gameplay; the later end screenshot
+shows Game Over. The post-sample GDB refresh counts were collected after Game Over
+and must not be treated as gameplay frequency evidence.
+
+Fifteen of sixteen probes passed. runtime_image_updates again reproduced its
+known baseline physical-alias CPU-write failure; initial, ordinary CPU update,
+descriptor swap, submission boundary, remap reuse and guard cases passed.
+The already-known swapchain WRITE_AFTER_PRESENT warning occurred in depth/shadow
+probes. The expanded runtime_image_loads probe checks four unchanged-table reads
+in one submission, including two writes to only one of its textures. All 512
+output words and guards passed; its run also reported WRITE_AFTER_PRESENT.
+
+A separate submit_draw_interval=32 experiment averaged 15.57 FPS and later
+ended in a GPUVM fault/device loss. Its timing setting was restored to zero.
+The fault has not been isolated to a specific code change.

@@ -164,9 +164,67 @@ int main(void) {
                                phase, mismatches);
                 failures += mismatches;
             }
+    GnmTexture mixed[2] = {textures[0], textures[0]};
+    for (unsigned t = 0; t < 2; ++t) {
+        uint32_t* data = st_arena_alloc(&arena, backing_bytes[0], 65536);
+        if (!data)
+            return st_fail("reason=mixed_memory");
+        st_fill_words(data, backing_bytes[0] / 4, t ? 0x3f000000 : 0x3e800000);
+        sceGnmTexSetBaseAddress(&mixed[t], data);
+        descriptors[t] = mixed[t];
+    }
+    GnmBuffer mixed_table = st_raw_buffer(descriptors, 2 * sizeof(GnmTexture));
+    mixed_table.stride = sizeof(GnmTexture);
+    mixed_table.numrecords = 2;
+    volatile uint32_t* mixed_output = st_arena_alloc(&arena, (8 + 4 * 128 + 8) * 4, 65536);
+    if (!mixed_output)
+        return st_fail("reason=mixed_output");
+    st_fill_words(mixed_output, 8 + 4 * 128 + 8, 0xdeadbeef);
+    StDcb repeated;
+    st_dcb_begin(&repeated, &queue);
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        if (pass >= 2) {
+            sceGnmDrawCmdSetCsShader(&repeated.cmd, &writer);
+            sceGnmDrawCmdSetTsharpUserData(&repeated.cmd, GNM_STAGE_CS, 0, &mixed[0]);
+            GnmBuffer value = {0};
+            uint32_t bits = pass == 2 ? 0x3f400000 : 0x3f800000;
+            memcpy(&value, &bits, sizeof(bits));
+            sceGnmDrawCmdSetVsharpUserData(&repeated.cmd, GNM_STAGE_CS, 8, &value);
+            sceGnmDrawCmdDispatchDirect(&repeated.cmd, 64, 1, 1, 0);
+            st_dcb_barrier(&repeated, 0);
+        }
+        GnmBuffer destination = st_raw_buffer(mixed_output + 8 + pass * 128, 128 * 4);
+        destination.stride = 4;
+        destination.numrecords = 128;
+        sceGnmDrawCmdSetCsShader(&repeated.cmd, &shaders[1]);
+        sceGnmDrawCmdSetVsharpUserData(&repeated.cmd, GNM_STAGE_CS, 0, &mixed_table);
+        sceGnmDrawCmdSetVsharpUserData(&repeated.cmd, GNM_STAGE_CS, 4, &destination);
+        sceGnmDrawCmdDispatchDirect(&repeated.cmd, 2, 1, 1, 0);
+        st_dcb_barrier(&repeated, 0);
+    }
+    if (!submit_and_wait(&repeated))
+        return st_fail("reason=mixed_submit");
+    unsigned mixed_mismatches = 0;
+    for (unsigned i = 0; i < 8 + 4 * 128 + 8; ++i) {
+        uint32_t expected = 0xdeadbeef;
+        if (i >= 8 && i < 8 + 4 * 128) {
+            unsigned pass = (i - 8) / 128;
+            expected = (i - 8) % 128 >= 64 ? 0x3f000000
+                       : pass < 2 ? 0x3e800000
+                       : pass == 2 ? 0x3f400000 : 0x3f800000;
+        }
+        if (mixed_output[i] != expected) {
+            if (!mixed_mismatches)
+                st_emit_marker("CHECK", "mixed word=%u expected=%08x got=%08x", i,
+                               expected, mixed_output[i]);
+            ++mixed_mismatches;
+        }
+    }
+    st_emit_marker("CHECK", "mixed_repeated_reads=4 mismatches=%u", mixed_mismatches);
+    failures += mixed_mismatches;
     if (failures)
         return st_fail("mismatches=%u", failures);
     st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=15 "
-                           "gpu_updates=3 cpu_updates=3 table_rewrite=1 guards=1");
+                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 table_rewrite=1 guards=1");
     return 0;
 }
