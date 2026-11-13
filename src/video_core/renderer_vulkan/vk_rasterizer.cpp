@@ -849,8 +849,11 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 if (!size || !memory->IsValidGpuMapping(sharp.base_address, size)) {
                     continue;
                 }
-                const auto flags = desc.is_written ? VideoCore::ObtainBufferFlags::IsWritten
-                                                   : VideoCore::ObtainBufferFlags{};
+                auto flags = desc.is_written ? VideoCore::ObtainBufferFlags::IsWritten
+                                             : VideoCore::ObtainBufferFlags{};
+                if (stage.uses_dma) {
+                    flags |= VideoCore::ObtainBufferFlags::IgnoreStreamBuffer;
+                }
                 const auto [buffer, offset] =
                     buffer_cache.ObtainBuffer(sharp.base_address, size, flags);
                 const u64 address = buffer->BufferDeviceAddress() + offset;
@@ -931,6 +934,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 }
                 if (desc.is_formatted) {
                     flags |= VideoCore::ObtainBufferFlags::IsTexelBuffer;
+                }
+                if (stage.uses_dma) {
+                    flags |= VideoCore::ObtainBufferFlags::IgnoreStreamBuffer;
                 }
                 const auto [buffer, offset] =
                     buffer_cache.ObtainBuffer(vsharp.base_address, size, flags);
