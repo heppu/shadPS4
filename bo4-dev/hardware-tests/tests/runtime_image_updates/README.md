@@ -25,3 +25,9 @@ writes both textures through that previously unused mapping. After SubmitDone,
 the unchanged descriptors still address the first mapping and must sample the
 new values (0.625 and 0.875). This checks CPU-backing verification without
 replacing the original same-frame CPU-update and descriptor-swap controls.
+
+The `remap_reuse` phase unmaps both sampled ranges, maps newly allocated direct
+memory at the same virtual addresses, and gives the new memory different pixels.
+It also overwrites the still-mapped old physical aliases with another pattern.
+Sampling must use the replacement memory, with no stale GPU backing or old-alias
+contents leaking across the mapping lifetime.
