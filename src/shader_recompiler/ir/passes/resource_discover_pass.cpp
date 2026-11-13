@@ -297,7 +297,10 @@ void MarkReadConstBufferSharpSources(const SharpReference& sharp) {
     }
 }
 
-void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
+static void DiscoverSharpTable(const SharpReference& sharp, SharpTableReference& table);
+
+void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources,
+                         const Profile& profile) {
     IR::Inst* handle = inst.Arg(0).Inst();
     auto& resource = resources.emplace_back(&inst);
     auto& vsharp = resource.sharps[0];
@@ -330,7 +333,32 @@ void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList
         vsharp.dwords[2] = dword2;
     }
 
-    MarkReadConstBufferSharpSources(vsharp);
+    auto& table = resource.tables[0];
+    if (profile.support_bda && vsharp.post_op == SharpFetchPostOp::None) {
+        switch (inst.GetOpcode()) {
+        case IR::Opcode::LoadBufferU32:
+        case IR::Opcode::LoadBufferU32x2:
+        case IR::Opcode::LoadBufferU32x3:
+        case IR::Opcode::LoadBufferU32x4:
+        case IR::Opcode::LoadBufferF32:
+        case IR::Opcode::LoadBufferF32x2:
+        case IR::Opcode::LoadBufferF32x3:
+        case IR::Opcode::LoadBufferF32x4:
+        case IR::Opcode::StoreBufferU32:
+        case IR::Opcode::StoreBufferU32x2:
+        case IR::Opcode::StoreBufferU32x3:
+        case IR::Opcode::StoreBufferU32x4:
+        case IR::Opcode::StoreBufferF32:
+        case IR::Opcode::StoreBufferF32x2:
+        case IR::Opcode::StoreBufferF32x3:
+        case IR::Opcode::StoreBufferF32x4:
+            DiscoverSharpTable(vsharp, table);
+            break;
+        default:
+            break;
+        }
+    }
+    MarkReadConstBufferSharpSources(table.index.IsEmpty() ? vsharp : table.sharp);
 }
 
 struct TableOffset {
@@ -555,7 +583,7 @@ ResourceDiscoveryList ResourceDiscoverPass(IR::Program& program, const Profile& 
     for (IR::Block* const block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             if (IsBufferInstruction(inst)) {
-                DiscoverBufferSharp(*block, inst, sharp_usages);
+                DiscoverBufferSharp(*block, inst, sharp_usages, profile);
             } else if (IsImageInstruction(inst)) {
                 DiscoverImageSharp(*block, inst, sharp_usages, profile);
             } else if (IsDataRingInstruction(inst)) {

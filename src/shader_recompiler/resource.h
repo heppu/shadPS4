@@ -89,6 +89,9 @@ enum class BufferType : u8 {
 
 struct BufferResource {
     SharpFetch<AmdGpu::Buffer> sharp_fetch{};
+    SharpFetch<AmdGpu::Buffer> table_fetch{};
+    u32 table_stride_dw{};
+    u32 table_offset_dw{};
     IR::Type used_types{};
     BufferType buffer_type{};
     bool is_written{};
@@ -97,12 +100,43 @@ struct BufferResource {
     u32 post_op_dw1_mask{};
     u32 post_op_dw2_shift{};
 
+    bool IsTable() const noexcept {
+        return table_stride_dw != 0;
+    }
+
+    AmdGpu::Buffer GetTableSharp(const auto& info) const noexcept {
+        AmdGpu::Buffer table{};
+        table_fetch.Fetch(info.flattened_ud_buf.data(), &table);
+        return table;
+    }
+
+    u32 NumTableEntries(const AmdGpu::Buffer& table) const noexcept {
+        const u64 dwords = table.GetSize() / sizeof(u32);
+        if (!IsTable() || dwords < table_offset_dw + 4) {
+            return 0;
+        }
+        return static_cast<u32>((dwords - table_offset_dw - 4) / table_stride_dw + 1);
+    }
+
+    AmdGpu::Buffer GetTableEntry(const AmdGpu::Buffer& table, u32 index) const noexcept {
+        AmdGpu::Buffer entry{};
+        const u64 offset = (u64{index} * table_stride_dw + table_offset_dw) * sizeof(u32);
+        if (offset + sizeof(entry) <= table.GetSize()) {
+            std::memcpy(&entry, reinterpret_cast<const void*>(table.base_address + offset),
+                        sizeof(entry));
+        }
+        return entry;
+    }
+
     bool IsSpecial() const noexcept {
         return buffer_type != BufferType::Guest;
     }
 
     constexpr AmdGpu::Buffer GetSharp(const auto& info) const noexcept {
         AmdGpu::Buffer buffer;
+        if (IsTable()) {
+            return AmdGpu::Buffer::Null();
+        }
         if (!sharp_fetch.Fetch(info.flattened_ud_buf.data(), &buffer)) {
             return AmdGpu::Buffer::Null();
         }
