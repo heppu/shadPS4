@@ -114,7 +114,11 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
 }
 
-BufferCache::~BufferCache() = default;
+BufferCache::~BufferCache() {
+    for (const auto& [blocks, memory] : backing_pool) {
+        instance.GetDevice().freeMemory(memory);
+    }
+}
 
 void BufferCache::TickFrame() {
     if (std::exchange(fault_process_pending, false)) {
@@ -371,6 +375,41 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     return arena;
 }
 
+vk::DeviceMemory BufferCache::AllocateBacking(u32 num_blocks) {
+    {
+        std::scoped_lock lk{backing_pool_mutex};
+        if (const auto it = backing_pool.find(num_blocks); it != backing_pool.end()) {
+            const auto memory = it->second;
+            backing_pool.erase(it);
+            backing_pool_bytes -= u64{num_blocks} << block_shift;
+            return memory;
+        }
+    }
+    const vk::MemoryAllocateFlagsInfo alloc_flags = {
+        .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
+    };
+    const vk::MemoryAllocateInfo alloc_info = {
+        .pNext = instance.IsBufferDeviceAddressSupported() ? &alloc_flags : nullptr,
+        .allocationSize = u64{num_blocks} << block_shift,
+        .memoryTypeIndex = arena_memory_type_index,
+    };
+    return Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
+}
+
+void BufferCache::RecycleBacking(vk::DeviceMemory memory, u32 num_blocks) {
+    static constexpr u64 MaxPoolBytes = 128_MB;
+    const u64 size = u64{num_blocks} << block_shift;
+    {
+        std::scoped_lock lk{backing_pool_mutex};
+        if (size <= MaxPoolBytes - backing_pool_bytes) {
+            backing_pool.emplace(num_blocks, memory);
+            backing_pool_bytes += size;
+            return;
+        }
+    }
+    instance.GetDevice().freeMemory(memory);
+}
+
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block) {
     ReviveZombies(first_block, last_block);
     u32 resident_blocks{};
@@ -385,16 +424,8 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
 
     const bool has_bda = instance.IsBufferDeviceAddressSupported();
-    const vk::MemoryAllocateFlagsInfo alloc_flags = {
-        .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
-    };
-    const vk::MemoryAllocateInfo alloc_info = {
-        .pNext = has_bda ? &alloc_flags : nullptr,
-        .allocationSize = resident_blocks << block_shift,
-        .memoryTypeIndex = arena_memory_type_index,
-    };
-    const auto device_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
-    backing_blocks.emplace(device_memory, resident_blocks);
+    const auto device_memory = AllocateBacking(resident_blocks);
+    backing_blocks.emplace(device_memory, BackingAllocation{resident_blocks, resident_blocks});
 
     boost::container::small_vector<vk::BufferCopy, 8> copies;
     const auto staging =
@@ -539,11 +570,12 @@ void BufferCache::FreeZombies() {
                 }
             }
             const auto it = backing_blocks.find(zombie.memory);
-            it->second -= num_blocks;
-            if (it->second == 0) {
+            it->second.remaining_blocks -= num_blocks;
+            if (it->second.remaining_blocks == 0) {
+                const u32 size_blocks = it->second.size_blocks;
                 backing_blocks.erase(it);
-                scheduler.DeferOperation([device = instance.GetDevice(), memory = zombie.memory] {
-                    device.freeMemory(memory);
+                scheduler.DeferOperation([this, memory = zombie.memory, size_blocks] {
+                    RecycleBacking(memory, size_blocks);
                 });
             }
         });
