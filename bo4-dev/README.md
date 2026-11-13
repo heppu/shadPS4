@@ -18,6 +18,22 @@ Paths inside the scripts point at the machine they were written on (`/mnt/games/
 
 Game data, the emulator user folder, build output and logs are not part of this branch.
 
+## Shared-GPU checks
+
+Keep other applications running when requested. Use fresh BO4 processes and
+lightweight `shot` captures before attempting full RenderDoc captures.
+`VRAM_MB` sets RADV's advertised heap size, not a resident-memory limit. Check
+`GPU memory budget is ... MiB` in the emulator log: an override close to memory
+already used by other applications can leave almost no usable budget and force
+heavy texture-cache pressure. In the November 13 shared-RPCS3 run, overrides of
+3/4/6 GiB reported usable budgets of 0/487/2278 MiB respectively.
+
+The watchdog independently checks combined GPU VRAM/GTT and available host RAM.
+Its defaults are `VRAM_MAX=12000`, `GTT_MAX=4000`, and `RAM_MIN=10000`, in MiB;
+a crossed limit stops BO4, not the other GPU applications. Preserve the run log,
+watchdog samples and screenshots before restarting. A visually correct sampled
+frame does not establish full-match stability or clear disabled Vulkan checks.
+
 ## Runtime buffer-table reproducer
 
 `bo4-dev/hardware-tests/tests/runtime_buffer_table` contains an OpenOrbis
