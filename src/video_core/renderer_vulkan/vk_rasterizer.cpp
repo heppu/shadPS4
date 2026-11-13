@@ -632,6 +632,11 @@ void Rasterizer::ResetBindings(bool is_compute) {
         if (image.binding.is_target || image.binding.is_storage) {
             image.InvalidateSubrects();
         }
+        if (image.binding.is_storage) {
+            if (const auto depth_id = texture_cache.GetAssociatedDepth(image)) {
+                runtime.CopyStencil(&image, &texture_cache.GetImage(depth_id));
+            }
+        }
         image.binding = {};
     }
     for (const auto [buffer, offset, size, src_access] : bound_buffers) {
@@ -1007,10 +1012,14 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             image_id = texture_cache.FindImage(desc);
             auto* image = &texture_cache.GetImage(image_id);
             if (auto depth_image_id = texture_cache.GetAssociatedDepth(*image)) {
-                // If this image has an associated depth image, it's a stencil attachment.
-                // Redirect the access to the actual depth-stencil buffer.
-                image_id = depth_image_id;
-                image = &texture_cache.GetImage(image_id);
+                auto& depth = texture_cache.GetImage(depth_image_id);
+                if (image_desc.is_written) {
+                    texture_cache.UpdateImage(image_id);
+                    runtime.CopyStencil(&depth, image);
+                } else {
+                    image_id = depth_image_id;
+                    image = &depth;
+                }
             }
             if (desc.IsSubrectTexture(image->info)) {
                 continue;
