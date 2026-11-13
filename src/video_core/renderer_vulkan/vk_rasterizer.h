@@ -215,6 +215,9 @@ private:
         u64 image_uid{};
         vk::ImageView view{};
         vk::ImageLayout layout{vk::ImageLayout::eShaderReadOnlyOptimal};
+        VideoCore::SubresourceRange range{};
+        u64 resolved_generation{};
+        bool has_direct_view{};
         u64 used_tick{};
         u64 synced_tick{};
         u64 synced_generation{};
