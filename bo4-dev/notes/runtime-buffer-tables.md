@@ -19,8 +19,10 @@ Physical PS4 execution remains outstanding. The emulator traps during guest
 `exit(0)` after reporting PASS; use the guest marker as the test result.
 
 Forecastle gameplay on the clean build shows wood/blood deck texture, ship-panel
-detail and colored zombie skin/clothing. Intermittent colored squares still need
-longer verification. Local evidence is under
+detail and colored zombie skin/clothing. Extended validation later reproduced
+missing/transparent ship surfaces, dark patches and overbright panels. Overall
+rendering validation fails; see [the follow-up report](rendering-validation-20261113.md).
+Local evidence for this earlier run is under
 `/mnt/games/PS4/bo4-dev/out/buffer-table-fix/`; the final run is
 `/mnt/games/PS4/bo4-dev/out/runs/1113-085406`.
 
