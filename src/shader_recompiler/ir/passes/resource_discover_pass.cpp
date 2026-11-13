@@ -589,7 +589,9 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
             return;
         }
     }
-    if (profile.max_image_table_size != 0 && inst.GetOpcode() == IR::Opcode::ImageSampleRaw &&
+    if (profile.max_image_table_size != 0 &&
+        (inst.GetOpcode() == IR::Opcode::ImageSampleRaw ||
+         inst.GetOpcode() == IR::Opcode::ImageRead) &&
         tsharp.post_op == SharpFetchPostOp::None) {
         DiscoverSharpTable(tsharp, image_table);
     }
