@@ -28,8 +28,11 @@ Id EmitQuadBroadcast(EmitContext& ctx, Id value, Id index) {
     return ctx.OpGroupNonUniformQuadBroadcast(ctx.U32[1], SubgroupScope(ctx), value, index);
 }
 
-Id EmitReadFirstLane(EmitContext& ctx, Id value) {
-    return ctx.OpGroupNonUniformBroadcastFirst(ctx.U32[1], SubgroupScope(ctx), value);
+Id EmitReadFirstLane(EmitContext& ctx, Id value, Id exec) {
+    const Id first_lane = EmitFindILsb64(ctx, exec);
+    const Id empty = ctx.OpIEqual(ctx.U1[1], first_lane, ctx.ConstU32(u32(-1)));
+    const Id lane = ctx.OpSelect(ctx.U32[1], empty, ctx.u32_zero_value, first_lane);
+    return ctx.OpGroupNonUniformBroadcast(ctx.U32[1], SubgroupScope(ctx), value, lane);
 }
 
 Id EmitShuffle(EmitContext& ctx, Id value, Id index) {
