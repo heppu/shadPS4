@@ -1158,16 +1158,25 @@ void Rasterizer::DropRemappedTableKeys() {
     }
     // A key cached for a descriptor is only good while its memory stays mapped as it was.
     std::ranges::sort(table_remapped_ranges);
-    std::erase_if(table_keys, [&](const auto& entry) {
-        const auto& cached = entry.second;
-        const auto it = std::ranges::upper_bound(table_remapped_ranges, cached.end, {},
+    const auto overlaps_remap = [&](VAddr begin, VAddr end) {
+        const auto it = std::ranges::upper_bound(table_remapped_ranges, end, {},
                                                  &std::pair<VAddr, VAddr>::first);
         return std::ranges::any_of(table_remapped_ranges.begin(), it, [&](const auto& range) {
-            return range.second > cached.begin && range.first < cached.end;
+            return range.second > begin && range.first < end;
         });
+    };
+    const auto removed = std::erase_if(table_keys, [&](const auto& entry) {
+        return overlaps_remap(entry.second.begin, entry.second.end);
     });
+    for (auto& table : image_tables) {
+        if (overlaps_remap(table.address, table.address + table.bytes)) {
+            table.checked_tick = std::numeric_limits<u64>::max();
+        }
+    }
     table_remapped_ranges.clear();
-    ++table_key_generation;
+    if (removed != 0) {
+        ++table_key_generation;
+    }
 }
 
 static bool IsTableImageCompatible(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
@@ -1292,6 +1301,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
         if (image && entry.has_direct_view && !image->binding.needs_rebind &&
             entry.resolved_generation == texture_cache.ImageGeneration() &&
             !texture_cache.GetAssociatedDepth(*image)) {
+            entry.synced_update_version = texture_cache.ImageUpdateVersion(entry.image_id);
             texture_cache.UpdateImage(entry.image_id);
             if (!image->binding.is_bound) {
                 bound_images.emplace_back(entry.image_id);
@@ -1317,6 +1327,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
         image_id = depth_id;
     }
     auto& image = texture_cache.GetImage(image_id);
+    const u64 update_version = texture_cache.ImageUpdateVersion(image_id);
     vk::ImageView view;
     if (desc.IsSubrectTexture(image.info)) {
         texture_cache.UpdateImage(image_id);
@@ -1352,6 +1363,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
             .has_direct_view = !desc.IsSubrectTexture(image.info) && !image.info.props.is_depth &&
                                image.info.guest_address == tsharp.Address(),
             .used_tick = TableEpoch(),
+            .synced_update_version = update_version,
             .resolved_address = tsharp.Address(),
         });
     return view;
@@ -1414,10 +1426,13 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             }
         }
         if (image && !is_target(*image)) {
+            const u64 update_version = texture_cache.ImageUpdateVersion(entry.image_id);
             if (image_desc && (entry.synced_tick != gc_tick ||
-                               entry.synced_generation != table_cache_generation)) {
+                               entry.synced_generation != table_cache_generation ||
+                               entry.synced_update_version != update_version)) {
                 entry.synced_tick = gc_tick;
                 entry.synced_generation = table_cache_generation;
+                entry.synced_update_version = update_version;
                 if (address == entry.resolved_address) {
                     texture_cache.UpdateImage(entry.image_id);
                 } else {
@@ -1473,6 +1488,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             if (content_changed) {
                 texture_cache.InvalidateImage(image_id);
             }
+            entry.synced_update_version = texture_cache.ImageUpdateVersion(image_id);
             texture_cache.UpdateImage(image_id);
             entry.view = *texture_cache.FindTexture(image_id, desc).image_view;
             entry.image_id = image_id;
@@ -1582,7 +1598,9 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             auto& gpu_views = image_table_gpu_views;
             gpu_views.clear();
             for (auto& candidate : table.entries) {
-                if (!refresh_all && !candidate.is_dynamic) {
+                if (!refresh_all && !candidate.is_dynamic &&
+                    candidate.update_version ==
+                        texture_cache.ImageUpdateVersion(candidate.image_id)) {
                     continue;
                 }
                 candidate.is_dynamic = true;
@@ -1600,6 +1618,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 }
                 u64 key = candidate.key;
                 if (key == 0) {
+                    table.has_unresolved = true;
                     continue;
                 }
                 vk::ImageView view;
@@ -1625,6 +1644,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     auto& resolved = table_images.at(key);
                     image_table_layouts[i] = resolved.layout;
                     const auto* image = resolved.GetImage(texture_cache);
+                    candidate.image_id = resolved.image_id;
+                    candidate.update_version = resolved.synced_update_version;
                     candidate.is_dynamic =
                         !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
                     table.has_gpu_images |= candidate.is_dynamic;
@@ -1700,6 +1721,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     static constexpr u64 EvictInterval = 64;
     static constexpr u64 EvictAge = 256;
 
+    DropRemappedTableKeys();
     const auto vsharp = image_desc.GetTableSharp(stage);
     const VAddr address = vsharp.base_address;
     const u32 bytes = vsharp.GetSize();
@@ -1738,18 +1760,21 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                                          128 * static_cast<size_t>(it->number_format)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
     if (it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
-        it->checked_generation != table_cache_generation || is_switched) {
+        it->checked_generation != table_cache_generation ||
+        it->checked_key_generation != table_key_generation || is_switched) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
-        bool refresh_all =
-            it->current_set < 0 || it->checked_tick != gc_tick ||
-            it->checked_update_generation != update_generation || it->has_unresolved ||
-            (!it->is_depth && !it->is_read && it->has_gpu_images) ||
-            it->checked_state_generation != state_generation || !table_remapped_ranges.empty() ||
-            ((it->is_depth || it->is_read) && it->current_set >= 0 &&
-             image_table_sets[it->current_set].generation != texture_cache.ImageGeneration());
+        bool refresh_all = it->current_set < 0 || it->checked_tick != gc_tick ||
+                           it->checked_state_generation != state_generation ||
+                           it->checked_key_generation != table_key_generation ||
+                           (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
+                                                        texture_cache.ImageGeneration());
+        const bool refresh_changed = it->checked_update_generation != update_generation ||
+                                     it->has_unresolved || it->has_gpu_images || it->is_depth ||
+                                     it->is_read;
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
+        it->checked_key_generation = table_key_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             const auto* source = reinterpret_cast<const void*>(address);
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
@@ -1781,7 +1806,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
             std::ranges::fill(it->shadow, u8{0});
             it->entries.clear();
         }
-        if (refresh_all || it->is_depth || it->is_read) {
+        if (refresh_all || refresh_changed) {
             it->checked_update_generation = update_generation;
             it->checked_state_generation = state_generation;
             BuildImageTableSet(table_index, &image_desc, refresh_all);

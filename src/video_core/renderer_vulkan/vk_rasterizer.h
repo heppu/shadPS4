@@ -223,6 +223,7 @@ private:
         u64 used_tick{};
         u64 synced_tick{};
         u64 synced_generation{};
+        u64 synced_update_version{};
         VAddr resolved_address{};
         u64 full_hash{};
         VAddr content_address{};
@@ -260,6 +261,8 @@ private:
         u64 key_tick{};
         u64 key_generation{};
         bool is_dynamic{true};
+        VideoCore::ImageId image_id{};
+        u64 update_version{};
     };
     struct ImageTable {
         VAddr address{};
@@ -272,6 +275,7 @@ private:
         std::vector<ImageTableEntry> entries;
         u64 checked_tick{};
         u64 checked_generation{};
+        u64 checked_key_generation{};
         u64 checked_update_generation{};
         u64 checked_state_generation{};
         s32 current_set{-1};
