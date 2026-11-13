@@ -1465,6 +1465,18 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
     const u32 set_index = AcquireImageTableSet(image_tables[table_index].num_entries);
     auto& table = image_tables[table_index];
     auto& set = image_table_sets[set_index];
+    for (u32 i = 0; i < table.num_entries; ++i) {
+        if (!image_table_views[i]) {
+            continue;
+        }
+        const auto entry = table_images.find(image_table_keys[i]);
+        if (entry == table_images.end() || entry->second.view != image_table_views[i] ||
+            !texture_cache.TryGetImage(entry->second.image_id, entry->second.image_uid)) {
+            image_table_views[i] = vk::ImageView{};
+            image_table_keys[i] = 0;
+            table.has_unresolved = true;
+        }
+    }
     u32 first = table.num_entries;
     u32 last = 0;
     for (u32 i = 0; i < table.num_entries; ++i) {
