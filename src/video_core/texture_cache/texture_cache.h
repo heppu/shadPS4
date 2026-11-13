@@ -185,7 +185,7 @@ public:
         Image& image = slot_images[image_id];
         std::scoped_lock lk{image.mutex};
         image.flags |= ImageFlagBits::CpuDirty;
-        update_generation.fetch_add(1, std::memory_order_release);
+        NotifyImageUpdate(image);
     }
 
     /// Marks the image as in use without reading guest memory.
@@ -456,6 +456,12 @@ private:
     void DeleteImage(ImageId image_id);
 
     /// Touch the image in the LRU cache.
+    void NotifyImageUpdate(const Image& image) {
+        if (image.IsReadOnlyTexture()) {
+            update_generation.fetch_add(1, std::memory_order_release);
+        }
+    }
+
     void TouchImage(Image& image);
 
     /// Removes image from the cache and schedules it for deletion.

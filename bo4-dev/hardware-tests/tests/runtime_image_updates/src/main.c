@@ -68,16 +68,20 @@ int main(void) {
             data[i] = t ? .25f : .125f;
         sceGnmTexSetBaseAddress(&textures[t], data);
     }
+    void* alias = NULL;
+    if (!st_dmem_map(&alias, arena.size, arena.direct_memory, false))
+        return st_fail("reason=alias_mapping");
     GnmBuffer table = st_raw_buffer(textures, 2 * sizeof(GnmTexture));
     table.stride = sizeof(GnmTexture);
     table.numrecords = 2;
     GnmSampler sampler = {0};
-    StCase cases[5] = {{.name = "initial"},
+    StCase cases[6] = {{.name = "initial"},
                        {.name = "cpu_update"},
                        {.name = "descriptor_swap"},
                        {.name = "submit_boundary"},
+                       {.name = "physical_alias"},
                        {.name = "guards"}};
-    for (unsigned phase = 0; phase < 4; ++phase) {
+    for (unsigned phase = 0; phase < 5; ++phase) {
         if (phase == 1) {
             for (unsigned t = 0; t < 2; ++t)
                 for (unsigned i = 0; i < sizes[t] / 4; ++i)
@@ -90,7 +94,16 @@ int main(void) {
             textures[1] = tmp;
             st_store_fence();
         }
-        if (phase == 3 && sceGnmSubmitDone() < 0)
+        if (phase == 4) {
+            for (unsigned t = 0; t < 2; ++t) {
+                float* alias_pixels = (float*)((uint8_t*)alias +
+                                               ((uint8_t*)pixels[t] - arena.base));
+                for (unsigned i = 0; i < sizes[t] / 4; ++i)
+                    alias_pixels[i] = t ? .875f : .625f;
+            }
+            st_store_fence();
+        }
+        if (phase >= 3 && sceGnmSubmitDone() < 0)
             return st_fail("reason=submit_done");
         volatile uint32_t* output = st_arena_alloc(&arena, 144 * 4, 65536);
         st_fill_words(output, 144, 0xdeadbeef);
@@ -110,12 +123,13 @@ int main(void) {
             return st_fail("reason=submit");
         for (unsigned i = 0; i < 144; ++i) {
             uint32_t expected = 0xdeadbeef;
-            unsigned which = 4;
+            unsigned which = 5;
             if (i >= 8 && i < 136) {
                 unsigned group = (i - 8) / 64;
                 which = phase;
                 float value = phase == 0   ? (group ? .25f : .125f)
                               : phase == 1 ? (group ? .75f : .5f)
+                              : phase == 4 ? (group ? .625f : .875f)
                                            : (group ? .5f : .75f);
                 memcpy(&expected, &value, 4);
             }
@@ -123,5 +137,6 @@ int main(void) {
         }
     }
     sceGnmSubmitDone();
-    return st_finish_cases(cases, 5, "cpu_update=1 descriptor_swap=1 submit_boundary=1 guards=1");
+    return st_finish_cases(cases, 6,
+                           "cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 guards=1");
 }
