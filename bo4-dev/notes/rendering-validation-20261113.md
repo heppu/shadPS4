@@ -708,3 +708,37 @@ Build: out/ship-fix/depth-table-fix-build2.log, BUILD_EXIT=0.
 Baseline: depth-direct-run.log. Fixed: depth-table-fixed.log.
 Validated suite: depth-validated-*.log. Post-fix game checks remain in progress;
 passing synthetic cases alone does not establish correct game shadow tables.
+
+
+Post-depth-fix game checks reach Ancient Evil and Tag der Toten. Ancient's
+normal opening retains gold, stone, cloth, skin, fire and blue-effect detail;
+89 fresh shader permutations contain valid runtime depth tables. Tag's
+0xdbfe971f permutations 0–2 now have valid depth tables at bindings 22/23,
+previously invalid in the version-23 cache. Program 0x9831dde2 was not exercised
+in this run. Tag shows textured snow, skin, metal, water and sunset lighting.
+Screenshots: rendering-{ancient,tag}-depth-fixed-20261113.png. These remain
+opening-area checks, not completed rounds. The player downed while unattended.
+The post-Ancient report briefly showed black clothing; the following lobby
+view restored the full clothing textures. That transient screen needs a repeat
+check. Local log: depth-fixed-ancient-tag.log. RPCS3 remained running throughout.
+
+An offline structural check passed 2,275 dumped SPIR-V modules. Metadata audit
+also exposed 18 compute programs with other invalid image bindings, including
+runtime IMAGE_GET_RESINFO and compact R128 texture descriptors. Structural
+SPIR-V validity does not establish correct resource binding.
+
+### Runtime image-size queries
+
+Original runtime_image_queries passes four direct controls but fails all four
+runtime cases on f1e7f9ec with 1,920 mismatches. Runtime query lowering now reads
+sizes and view ranges directly from the descriptor, avoiding a null image
+binding. The eight cases pass with nonzero base mips, array subranges, mixed
+2D/3D types, two LODs, table rewrites and guards. Core/synchronization validation
+reports zero VUID/SYNC errors. Binary cache version is 25.
+
+Depth tables, mixed image dimensions, image updates, and dynamic scalar reads
+also pass with zero VUID/SYNC reports. The scalar probe requires DMA enabled;
+an initial run with its default disabled fails as documented and is not a
+regression. Build: query-fix-build.log, BUILD_EXIT=0. Probe logs:
+query-baseline3.log, query-fixed.log, query-regression-*.log (use scalar-dma for
+the scalar probe). Post-query-fix game validation remains pending.
