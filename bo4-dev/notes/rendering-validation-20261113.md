@@ -1017,3 +1017,14 @@ rendering-ancient-report-exec-fixed-20261113.png and
 rendering-ancient-lobby-exec-fixed-20261113.png. This closes the specific observed
 post-Ancient clothing regression; higher-MRT SRC1 semantics, full-match coverage
 and the small player-card artwork comparison remain unverified.
+
+
+The small purple player portrait is the default Battery emblem. Opening
+Identity > Emblems shows its full-size artwork and name. Its shapes, pink/purple
+highlights and black regions match VGR's October 16, 2018 in-game screenshot and
+Battery close-up; this is intentional artwork, not a shader defect. No emblem
+selection was changed. Current screenshot: rendering-battery-emblem-20261113.png.
+Reference: https://vgr.com/black-ops-4-emblems/ and
+https://www.vgr.com/wp-content/uploads/2018/10/Battery-Emblem-300x300.jpg.
+The post-menu audit reaches 1,231 records with zero invalid or skipped records;
+all 2,779 dumped SPIR-V modules validate. Logs: readfirst-final-{audit,spirv}.log.
