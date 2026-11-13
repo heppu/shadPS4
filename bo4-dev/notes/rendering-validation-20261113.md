@@ -189,3 +189,20 @@ Local evidence: out/volume-ix-{gameplay,gate,combat,exitfocus}.png and
 out/ship-fix/volume-fixed-ix-gameplay.log. The local shared homebrew bundle
 `out/bo4-rendering-probes.tar.gz` now includes runtime_image_dimensions and
 runtime_buffer_table alongside the four earlier rendering probes.
+
+
+## Correction: Alpha Omega preview is intentional mosaic artwork
+
+Draw 21155 of `out/ship-fix/alpha-artifact.rdc` samples one 1920x1080 BC7 sRGB
+image (resource 512845). Exporting it at full size reveals intact miniature
+screenshots forming the artwork. It is not a tiling corruption: Treyarch
+released this mosaic in July 2019. Reference announcement:
+https://doope.jp/2019/0792262.html (links Treyarch's original announcement and
+https://www.callofduty.com/cdn/images/alpha-omega.jpg). The official image
+URL timed out during retrieval; the exported texture and announcement establish
+the mosaic design. No emulator change is warranted for this preview.
+
+A separate bright purple ground reflection appeared in the lobby after returning
+from IX, then disappeared after capture. `out/ship-fix/lobby-reflection.rdc` and
+`out/volume-mutation-lobby.png` preserve that investigation; cause is not yet
+established. The player portrait also remains to be checked against its artwork.
