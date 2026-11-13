@@ -4,6 +4,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <absl/container/flat_hash_map.h>
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -252,6 +253,9 @@ private:
     struct ImageTableEntry {
         u32 index;
         AmdGpu::Image sharp;
+        u64 key{};
+        u64 key_tick{};
+        u64 key_generation{};
     };
     struct ImageTable {
         VAddr address{};
@@ -264,8 +268,12 @@ private:
         std::vector<ImageTableEntry> entries;
         u64 checked_tick{};
         u64 checked_generation{};
+        u64 checked_update_generation{};
+        u64 checked_state_generation{};
         s32 current_set{-1};
         bool has_unresolved{};
+        bool built_empty{};
+        bool has_gpu_images{};
         bool is_depth{};
         bool is_r128{};
         bool is_read{};
@@ -284,6 +292,8 @@ private:
         VAddr end;
     };
     std::unordered_map<u64, TableKey> table_keys;
+    u64 table_key_generation{};
+    absl::flat_hash_map<u64, vk::ImageView> image_table_gpu_views;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
     std::array<u32, 128 * AmdGpu::NUM_NUMBER_FMTS> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
