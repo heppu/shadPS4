@@ -30,6 +30,10 @@ make -C tests/mrt_src1_probe
 python3 scripts/run-test.py mrt_src1_probe --shadps4 /path/to/shadps4 --timeout 40
 ```
 
+Keep the runner's precise readbacks and linear-image readback enabled for the
+emulator run. Disabling linear-image readback makes this CPU pixel oracle read
+the initialized targets, including the three known controls.
+
 Run `out/mrt_src1_probe/mrt_src1_probe.elf` using an existing homebrew ELF loader
 on a PS4 and retain its stdout, including all MEASURE and SHADTEST lines. It needs
 no game files or external shader assets. Physical-console results are pending.
