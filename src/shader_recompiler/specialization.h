@@ -46,6 +46,7 @@ struct BufferSpecialization {
 struct ImageSpecialization {
     AmdGpu::ImageType type = AmdGpu::ImageType::Color2D;
     bool is_integer = false;
+    bool is_signed = false;
     bool is_storage = false;
     bool is_srgb = false;
     AmdGpu::CompMapping dst_select{};
@@ -134,6 +135,7 @@ struct StageSpecialization {
                      [&](auto& spec, const auto& desc, AmdGpu::Image sharp) {
                          spec.type = sharp.GetViewType(desc.is_array);
                          spec.is_integer = AmdGpu::IsInteger(sharp.GetNumberFmt());
+                         spec.is_signed = sharp.GetNumberFmt() == AmdGpu::NumberFormat::Sint;
                          spec.is_storage = desc.is_written;
                          if (spec.is_storage) {
                              spec.dst_select = sharp.DstSelect();

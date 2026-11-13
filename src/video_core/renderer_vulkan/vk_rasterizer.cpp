@@ -1170,7 +1170,7 @@ void Rasterizer::DropRemappedTableKeys() {
 }
 
 u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
-                              bool is_depth) {
+                              bool is_depth, bool is_read, AmdGpu::NumberFormat number_format) {
     if (!tsharp.Valid() || tsharp.Address() == 0) {
         return 0;
     }
@@ -1180,17 +1180,16 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
         data_fmt == AmdGpu::DataFormat::FormatInvalid || AmdGpu::IsFmask(data_fmt)) {
         return 0;
     }
-    // Table images are declared as one float-sampled type per table. Formats that may alias a
-    // depth buffer are left out because GPU-written surfaces need per-draw handling.
     const auto type = tsharp.GetType();
     const bool is_array_table =
         table_type == AmdGpu::ImageType::Cube || table_type == AmdGpu::ImageType::Color2DArray;
     const bool is_type_match =
         is_array_table ? type == AmdGpu::ImageType::Cube || type == AmdGpu::ImageType::Color2DArray
                        : type == table_type;
-    if (!is_type_match || AmdGpu::IsInteger(num_fmt) ||
+    if (!is_type_match ||
+        AmdGpu::GetNumberClass(num_fmt) != AmdGpu::GetNumberClass(number_format) ||
         tsharp.GetNumberConversion() != AmdGpu::NumberConversion::None ||
-        (!is_depth &&
+        (!is_depth && !is_read &&
          (data_fmt == AmdGpu::DataFormat::Format16 || data_fmt == AmdGpu::DataFormat::Format32)) ||
         !memory->IsValidGpuMapping(tsharp.Address(), 0)) {
         return 0;
@@ -1203,6 +1202,9 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
             return 0;
         }
         return XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(table_type) | 0x100) | 1;
+    }
+    if (is_read) {
+        return XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), u64(table_type) | 0x200) | 1;
     }
     // Sampling memory for every entry on every frame is slow, so a descriptor keeps its key
     // for a while. Content that changes in place is caught by the periodic verification.
@@ -1274,30 +1276,42 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
     return XXH3_64bits(table_verify_data.data(), table_verify_data.size()) | 1;
 }
 
-vk::ImageView Rasterizer::ResolveDepthTableImage(const AmdGpu::Image& tsharp, u64 key,
-                                                 const Shader::ImageResource& image_desc) {
+vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 key,
+                                               const Shader::ImageResource& image_desc) {
     VideoCore::TextureCache::ImageDesc desc{tsharp, image_desc};
     auto image_id = texture_cache.FindImage(desc);
     if (const auto depth_id = texture_cache.GetAssociatedDepth(texture_cache.GetImage(image_id))) {
         image_id = depth_id;
     }
     auto& image = texture_cache.GetImage(image_id);
+    vk::ImageView view;
     if (desc.IsSubrectTexture(image.info)) {
-        return {};
+        texture_cache.UpdateImage(image_id);
+        view = *runtime.FindSubrectView(image, desc.info, desc.view_info).image_view;
+    } else {
+        view = *texture_cache.FindTexture(image_id, desc).image_view;
     }
-    const auto view = *texture_cache.FindTexture(image_id, desc).image_view;
     if (!image.binding.is_bound) {
         bound_images.emplace_back(image_id);
         image.binding.is_bound = 1u;
     }
     image.usage.texture = true;
-    needs_barrier |= runtime.Transit(&image, vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-                                     vk::PipelineStageFlagBits2::eAllCommands,
-                                     vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
+    auto layout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    if (!desc.IsSubrectTexture(image.info)) {
+        layout = image.info.props.is_depth ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+                                           : vk::ImageLayout::eShaderReadOnlyOptimal;
+        if (!image.info.props.is_depth &&
+            (image.binding.force_general || image.binding.is_target)) {
+            layout = vk::ImageLayout::eGeneral;
+        }
+        needs_barrier |= runtime.Transit(&image, layout, vk::PipelineStageFlagBits2::eAllCommands,
+                                         vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
+    }
     table_images.insert_or_assign(key, TableImage{
                                            .image_id = image_id,
                                            .image_uid = image.image_uid,
                                            .view = view,
+                                           .layout = layout,
                                            .used_tick = TableEpoch(),
                                            .resolved_address = tsharp.Address(),
                                        });
@@ -1463,6 +1477,7 @@ u32 Rasterizer::AcquireImageTableSet(u32 num_entries) {
     set.num_entries = num_entries;
     set.keys.assign(num_entries, 0);
     set.views.assign(num_entries, vk::ImageView{});
+    set.layouts.assign(num_entries, vk::ImageLayout::eShaderReadOnlyOptimal);
     image_table_infos.assign(num_entries,
                              vk::DescriptorImageInfo{
                                  .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -1492,7 +1507,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             table.has_unresolved = false;
             image_table_keys.assign(table.num_entries, 0);
             image_table_views.assign(table.num_entries, vk::ImageView{});
-            std::unordered_map<u64, vk::ImageView> depth_views;
+            image_table_layouts.assign(table.num_entries, vk::ImageLayout::eShaderReadOnlyOptimal);
+            std::unordered_map<u64, vk::ImageView> gpu_views;
             for (u32 i = 0; i < table.num_entries; ++i) {
                 AmdGpu::Image tsharp{};
                 std::memcpy(&tsharp,
@@ -1507,20 +1523,21 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 tsharp.min_lod_warn = 0;
                 tsharp.counter_bank_id = 0;
                 tsharp.lod_hw_cnt_en = 0;
-                u64 key = TableImageKey(tsharp, table.type, table.is_depth);
+                u64 key = TableImageKey(tsharp, table.type, table.is_depth, table.is_read,
+                                        table.number_format);
                 if (key == 0) {
                     continue;
                 }
                 vk::ImageView view;
-                if (table.is_depth) {
-                    const auto [it, inserted] = depth_views.try_emplace(key);
+                if (table.is_depth || table.is_read) {
+                    const auto [it, inserted] = gpu_views.try_emplace(key);
                     if (inserted) {
                         const Shader::ImageResource resource{
-                            .is_depth = true,
+                            .is_depth = table.is_depth,
                             .is_array = table.type == AmdGpu::ImageType::Cube ||
                                         table.type == AmdGpu::ImageType::Color2DArray,
                         };
-                        it->second = ResolveDepthTableImage(tsharp, key, resource);
+                        it->second = ResolveGpuTableImage(tsharp, key, resource);
                     }
                     view = it->second;
                 } else {
@@ -1529,6 +1546,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 if (view) {
                     image_table_keys[i] = key;
                     image_table_views[i] = view;
+                    image_table_layouts[i] = table_images.at(key).layout;
                 }
             }
             if (table_steals == 0) {
@@ -1550,7 +1568,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             table.has_unresolved = true;
         }
     }
-    if (table.current_set >= 0 && image_table_sets[table.current_set].views == image_table_views) {
+    if (table.current_set >= 0 && image_table_sets[table.current_set].views == image_table_views &&
+        image_table_sets[table.current_set].layouts == image_table_layouts) {
         auto& set = image_table_sets[table.current_set];
         set.keys = image_table_keys;
         set.generation = generation;
@@ -1561,7 +1580,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
     u32 first = table.num_entries;
     u32 last = 0;
     for (u32 i = 0; i < table.num_entries; ++i) {
-        if (set.views[i] != image_table_views[i]) {
+        if (set.views[i] != image_table_views[i] || set.layouts[i] != image_table_layouts[i]) {
             first = std::min(first, i);
             last = i;
         }
@@ -1570,9 +1589,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
         image_table_infos.clear();
         for (u32 i = first; i <= last; ++i) {
             image_table_infos.emplace_back(VK_NULL_HANDLE, image_table_views[i],
-                                           table.is_depth
-                                               ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-                                               : vk::ImageLayout::eShaderReadOnlyOptimal);
+                                           image_table_layouts[i]);
         }
         const vk::WriteDescriptorSet set_write = {
             .dstSet = set.set,
@@ -1586,6 +1603,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
     }
     set.keys.swap(image_table_keys);
     set.views.swap(image_table_views);
+    set.layouts.swap(image_table_layouts);
     set.generation = generation;
     set.is_current = true;
     if (table.current_set >= 0 && table.current_set != static_cast<s32>(set_index)) {
@@ -1607,7 +1625,9 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                table.stride_dw == image_desc.table_stride_dw &&
                table.offset_dw == image_desc.table_offset_dw &&
                table.num_entries == image_desc.table_size && table.type == image_desc.table_type &&
-               table.is_depth == image_desc.is_depth && table.is_r128 == image_desc.is_r128;
+               table.is_depth == image_desc.is_depth && table.is_r128 == image_desc.is_r128 &&
+               table.is_read == image_desc.table_is_read &&
+               table.number_format == image_desc.table_number_format;
     });
     if (it == image_tables.end()) {
         it = image_tables.insert(image_tables.end(), ImageTable{});
@@ -1619,6 +1639,8 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->type = image_desc.table_type;
         it->is_depth = image_desc.is_depth;
         it->is_r128 = image_desc.is_r128;
+        it->is_read = image_desc.table_is_read;
+        it->number_format = image_desc.table_number_format;
         const u64 shadow_size =
             (u64{it->num_entries} * it->stride_dw + it->offset_dw) * sizeof(u32) +
             sizeof(AmdGpu::Image);
@@ -1629,9 +1651,10 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     const u64 gc_tick = TableEpoch();
     // Guests alternate between copies of a table, coming back to one means it was rewritten.
     auto& last_table = last_image_tables[static_cast<size_t>(it->type) + (it->is_depth ? 16 : 0) +
-                                         (it->is_r128 ? 32 : 0)];
+                                         (it->is_r128 ? 32 : 0) + (it->is_read ? 64 : 0) +
+                                         128 * static_cast<size_t>(it->number_format)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
-    if (it->is_depth || it->current_set < 0 || it->checked_tick != gc_tick ||
+    if (it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
         it->checked_generation != table_cache_generation || is_switched) {
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
