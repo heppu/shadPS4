@@ -61,17 +61,30 @@ struct ImageInfo {
     bool IsCompatible(const ImageInfo& info) const;
 
     bool IsSubrectOf(const ImageInfo& info) const {
-        return (size.width < info.size.width || size.height < info.size.height) &&
-               size.width <= info.size.width && size.height <= info.size.height &&
-               size.depth == 1 && info.size.depth == 1 && guest_address == info.guest_address &&
-               guest_size <= info.guest_size && type == AmdGpu::ImageType::Color2D &&
-               type == info.type && resources.levels == 1 && resources.layers == 1 &&
-               info.resources.levels == 1 && info.resources.layers == 1 && !props.is_depth &&
-               !info.props.is_depth && !props.is_block && !info.props.is_block &&
-               pixel_format == info.pixel_format && num_bits == info.num_bits &&
-               num_samples == info.num_samples && pitch == info.pitch &&
-               tile_mode == info.tile_mode && bank_swizzle == info.bank_swizzle &&
-               alt_tile == info.alt_tile && mips_layout[0].pitch == info.mips_layout[0].pitch;
+        const bool compatible =
+            (size.width < info.size.width || size.height < info.size.height) &&
+            size.width <= info.size.width && size.height <= info.size.height && size.depth == 1 &&
+            info.size.depth == 1 && guest_address == info.guest_address &&
+            guest_size <= info.guest_size && type == AmdGpu::ImageType::Color2D &&
+            type == info.type && resources.levels <= info.resources.levels &&
+            resources.layers == 1 && info.resources.layers == 1 && !props.is_depth &&
+            !info.props.is_depth && !props.is_block && !info.props.is_block &&
+            pixel_format == info.pixel_format && num_bits == info.num_bits &&
+            num_samples == info.num_samples && pitch == info.pitch && tile_mode == info.tile_mode &&
+            bank_swizzle == info.bank_swizzle && alt_tile == info.alt_tile &&
+            mips_layout[0].pitch == info.mips_layout[0].pitch;
+        if (!compatible) {
+            return false;
+        }
+        for (u32 mip = 1; mip < resources.levels; ++mip) {
+            const auto& layout = mips_layout[mip];
+            const auto& source = info.mips_layout[mip];
+            if (layout.offset != source.offset || layout.pitch != source.pitch ||
+                layout.height != source.height) {
+                return false;
+            }
+        }
+        return true;
     }
     void UpdateSize() noexcept;
 
