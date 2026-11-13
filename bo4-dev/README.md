@@ -8,7 +8,7 @@ Paths inside the scripts point at the machine they were written on (`/mnt/games/
 
 - `bo4-dev/Dockerfile`, `sd`, `build`: build image, run a command in the container, incremental build.
 - `bo4-dev/headless`, `sway.conf`, `run`, `play`: headless run with a time limit, and a windowed run with audio and gamepads.
-- `bo4-dev/guard`: watchdog started by every run script. It kills the emulator when GPU memory or free RAM crosses a limit.
+- `bo4-dev/guard`: runs a command inside the container and monitors GPU memory/free RAM throughout its lifetime. It stops only its owned command group when a limit is crossed. Headless and windowed launches use it; `VRAM_MAX`, `GTT_MAX`, and `RAM_MIN` are forwarded into the container. It does not rely on a host background process or PID file.
 - `bo4-dev/shot`, `key`, `step`, `zmplay.sh`, `zmslow.sh`: screenshots, key injection, scripted route into a Zombies match.
 - `bo4-dev/hang`, `bprun`, `peekrun`, `gdb*`, `bp.py`, `peek.py`, `guest.py`, `watch.py`: gdb helpers for guest registers, host and guest breakpoints, memory dumps and runtime byte patches.
 - `bo4-dev/zmcap.sh`, `rdrun`, `rd/*.py`, `patches/rdoc-trigger.diff`: RenderDoc frame capture of a match on X11 (the capture layer refuses Wayland) and headless replay scripts that list passes, bound textures, descriptor accesses and resource usage. The diff adds a timed capture trigger (`RDOC_AT` seconds) to the emulator and is applied only for capture builds. Replay runs without network and with RenderDoc analytics off.

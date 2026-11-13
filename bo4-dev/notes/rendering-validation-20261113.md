@@ -1028,3 +1028,21 @@ Reference: https://vgr.com/black-ops-4-emblems/ and
 https://www.vgr.com/wp-content/uploads/2018/10/Battery-Emblem-300x300.jpg.
 The post-menu audit reaches 1,231 records with zero invalid or skipped records;
 all 2,779 dumped SPIR-V modules validate. Logs: readfirst-final-{audit,spirv}.log.
+
+
+The host watchdog exited at 20:39:24 while the detached BO4 container remained
+alive (confirmed at 20:46:33; its recorded PID no longer existed). Earlier
+within-guard samples remain valid, but later menu checks were not continuously
+guarded. The tooling now runs the watchdog as the command supervisor inside
+the container. Headless/windowed launches use it, memory-limit environment
+variables are passed through, and no host PID file or background launcher is
+needed. A crossed limit or monitoring failure stops only the supervised command
+process group; normal/nonzero exits are preserved and termination signals clean
+up the child. Container exit then removes remaining container processes.
+
+Functional checks pass: exit status 7 is preserved; an impossible RAM minimum
+returns 137 without starting the command; SIGTERM returns 143 and reaps the
+owned sleeping child. Python syntax and shell syntax checks pass. A detached IX
+run confirms watchdog PID 7 remains under docker-init after the launcher exits,
+with fresh memory samples. RPCS3 PID 32412 remains running. The renderer binary
+is unchanged; remaining map checks continue with a 4 GiB override.
