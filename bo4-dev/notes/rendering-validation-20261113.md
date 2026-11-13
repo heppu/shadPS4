@@ -1065,3 +1065,24 @@ alive for the entire roughly 12-minute run, through repeated level/report/lobby
 transitions; guarded-ix-memory.log has fresh samples up to the intentional stop
 and no threshold event. RPCS3 remains running. Higher-MRT blend semantics and
 full-match coverage remain unresolved.
+
+
+Blood of the Dead reaches Richtofen's Laboratory on the same renderer. Normal
+frames show textured walls, paper/floor debris, wooden benches, glass vessels,
+metal reflections, blue blueprint and localized overhead lighting. Movement,
+pistol fire, damage and revival execute. Screenshot:
+rendering-blood-exec-fixed-20261113.png. Gameplay is only 2–5 FPS, falling to
+about 1 FPS at the pause menu. The run does not complete a report transition: the
+guard stops BO4 at 19:08:47 UTC with 12,006 MiB combined VRAM, 1,878 MiB GTT
+and 21,873 MiB available RAM. RPCS3 remains running. The run's 761 memory samples
+peak at 1,943 MiB GTT; the preserved game log has zero renderer errors and critical
+messages, with Vulkan validation disabled. Evidence: guarded-blood-game.log,
+guarded-blood-memory.log, guarded-blood-game/20.png.
+
+The 4 GiB driver override reports only a 487 MiB usable GPU budget while RPCS3
+shares the device. A 3 GiB Classified startup reports zero MiB and is stopped
+intentionally before gameplay. A fresh 6 GiB override reports 2,278 MiB usable
+budget, while retaining the same 12,000 MiB combined-VRAM watchdog limit. The
+override is not a hard resident cap, and lowering it can increase texture-cache
+pressure rather than reliably constrain memory. Further map checks use the
+usable budget with fresh processes.
