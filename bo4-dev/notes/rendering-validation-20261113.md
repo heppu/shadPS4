@@ -105,3 +105,19 @@ Binding set 0 before higher sets passes (exit 0, no VUID). This order also reach
 the BO4 title screen past the captured startup failure. The emulator now binds
 sets in ascending order; this does not change guest shader semantics.
 Local diagnostic source/log: out/ship-fix/push-layout-repro.cpp and .log.
+
+## Follow-up: image-table descriptor lifetime
+
+Image-table construction can retire views collected earlier in the same pass;
+waiting to reuse a descriptor set can also finish their deferred destruction.
+The assembled table is now checked against the cache's view and image identity
+immediately before updating descriptors. Retired entries become null and mark
+the table unresolved for a later rebuild. Existing draw-time validation remains.
+
+The combined cold-start run reaches Voyage of Despair, turns toward the sea and
+lantern, fires the weapon, and moves toward the ship's stairs. Its log contains
+no 02996, 06409, or 01389 reports. The remaining Vulkan category is 09239.
+The preserved muzzle-flash frame `rendering-fire-20261113.png` shows lit reflective
+weapon surfaces, skin, textured zombies, deck, restored ship geometry and fog.
+This is representative scene/effect coverage, not a full-match/all-map claim.
+Local frames/logs: out/ascending-*.png and out/ship-fix/ascending-gameplay-final.log.
