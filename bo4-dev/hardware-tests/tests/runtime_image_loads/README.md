@@ -32,3 +32,9 @@ claimed.
 The cached-view follow-up retains per-draw updates and barriers and keeps depth,
 stencil aliases, and cropped views on the full resolution path. The three CPU
 rewrite cases cover the newly cached path.
+
+The incremental table-refresh follow-up adds four reads from an unchanged two-image
+table in one submission. Both images begin as CPU-uploaded textures; the last two
+reads follow GPU writes to the first image while the second remains unchanged.
+All 512 output words and surrounding guards are checked, including the transition
+from an immutable texture into a GPU-written image.

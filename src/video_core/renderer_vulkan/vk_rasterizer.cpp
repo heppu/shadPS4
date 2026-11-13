@@ -1549,7 +1549,8 @@ u32 Rasterizer::AcquireImageTableSet(u32 num_entries) {
     return static_cast<u32>(image_table_sets.size() - 1);
 }
 
-void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc) {
+void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc,
+                                    bool refresh_all) {
     DropRemappedTableKeys();
     const u64 epoch = TableEpoch();
     const u64 generation = texture_cache.ImageGeneration();
@@ -1567,13 +1568,27 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             table_steals = 0;
             table.has_unresolved = false;
             table.has_gpu_images = false;
-            image_table_keys.assign(table.num_entries, 0);
-            image_table_views.assign(table.num_entries, vk::ImageView{});
-            image_table_layouts.assign(table.num_entries, vk::ImageLayout::eShaderReadOnlyOptimal);
+            if (!refresh_all && table.current_set >= 0) {
+                const auto& current = image_table_sets[table.current_set];
+                image_table_keys = current.keys;
+                image_table_views = current.views;
+                image_table_layouts = current.layouts;
+            } else {
+                image_table_keys.assign(table.num_entries, 0);
+                image_table_views.assign(table.num_entries, vk::ImageView{});
+                image_table_layouts.assign(table.num_entries,
+                                           vk::ImageLayout::eShaderReadOnlyOptimal);
+            }
             auto& gpu_views = image_table_gpu_views;
             gpu_views.clear();
             for (auto& candidate : table.entries) {
+                if (!refresh_all && !candidate.is_dynamic) {
+                    continue;
+                }
+                candidate.is_dynamic = true;
                 const u32 i = candidate.index;
+                image_table_keys[i] = 0;
+                image_table_views[i] = vk::ImageView{};
                 const auto& tsharp = candidate.sharp;
                 if (candidate.key == 0 || (!table.is_depth && !table.is_read &&
                                            (candidate.key_tick != epoch ||
@@ -1609,16 +1624,16 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     image_table_views[i] = view;
                     auto& resolved = table_images.at(key);
                     image_table_layouts[i] = resolved.layout;
-                    if (!table.is_depth && !table.is_read) {
-                        const auto* image = resolved.GetImage(texture_cache);
-                        table.has_gpu_images |=
-                            !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
-                    }
+                    const auto* image = resolved.GetImage(texture_cache);
+                    candidate.is_dynamic =
+                        !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
+                    table.has_gpu_images |= candidate.is_dynamic;
                 }
             }
             if (table_steals == 0) {
                 break;
             }
+            refresh_all = true;
         }
     }
 
@@ -1726,17 +1741,19 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_generation != table_cache_generation || is_switched) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
-        bool needs_rebuild =
-            it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
+        bool refresh_all =
+            it->current_set < 0 || it->checked_tick != gc_tick ||
             it->checked_update_generation != update_generation || it->has_unresolved ||
-            it->has_gpu_images || it->checked_state_generation != state_generation ||
-            !table_remapped_ranges.empty();
+            (!it->is_depth && !it->is_read && it->has_gpu_images) ||
+            it->checked_state_generation != state_generation || !table_remapped_ranges.empty() ||
+            ((it->is_depth || it->is_read) && it->current_set >= 0 &&
+             image_table_sets[it->current_set].generation != texture_cache.ImageGeneration());
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             const auto* source = reinterpret_cast<const void*>(address);
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
-                needs_rebuild = true;
+                refresh_all = true;
                 std::memcpy(it->shadow.data(), source, bytes);
                 it->entries.clear();
                 for (u32 i = 0; i < it->num_entries; ++i) {
@@ -1760,14 +1777,14 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                 }
             }
         } else {
-            needs_rebuild |= !it->entries.empty();
+            refresh_all |= !it->entries.empty();
             std::ranges::fill(it->shadow, u8{0});
             it->entries.clear();
         }
-        if (needs_rebuild) {
+        if (refresh_all || it->is_depth || it->is_read) {
             it->checked_update_generation = update_generation;
             it->checked_state_generation = state_generation;
-            BuildImageTableSet(table_index, &image_desc);
+            BuildImageTableSet(table_index, &image_desc, refresh_all);
         }
 
         if (gc_tick - table_evict_tick >= EvictInterval) {
