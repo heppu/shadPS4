@@ -754,6 +754,30 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
     return {};
 }
 
+ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
+    ImageId candidate{};
+    ImageId exact{};
+    u32 candidates = 0;
+    u32 exact_matches = 0;
+    ForEachImageInRegion(address, 1, [&](ImageId image_id, Image& image) {
+        if (!image.HasGpuValidData() || address < image.info.guest_address ||
+            address - image.info.guest_address >= image.info.guest_size) {
+            return;
+        }
+        candidate = image_id;
+        ++candidates;
+        if (address == image.info.guest_address && size == image.info.guest_size) {
+            exact = image_id;
+            ++exact_matches;
+        }
+    });
+    const ImageId selected = exact_matches == 1 ? exact : candidates == 1 ? candidate : ImageId{};
+    if (selected) {
+        TouchImage(slot_images[selected]);
+    }
+    return selected;
+}
+
 ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     if (desc.type == BindingType::Storage) {
