@@ -4,15 +4,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$HOME/code/github.com/heppu/shadPS4
 X=${XDG_RUNTIME_DIR:-/run/user/1000}; W=${WAYLAND_DISPLAY:-wayland-1}
 GIDS=$(stat -c %g /dev/dri/* /dev/input/event0 2>/dev/null | sort -u | sed 's/^/--group-add /' | tr '\n' ' ')
-(setsid /mnt/games/PS4/bo4-dev/guard >/dev/null 2>&1 &)
 docker rm -f shad-play >/dev/null 2>&1
 exec docker run --rm --init --name shad-play \
   --cap-add SYS_NICE --security-opt seccomp=unconfined \
-  --device /dev/dri $GIDS --memory 28g --memory-swap 28g -e override_vram_size=${VRAM_MB:-10240} --device-cgroup-rule='c 13:* rmw' \
+  --device /dev/dri $GIDS -e VRAM_MAX=${VRAM_MAX:-12000} -e GTT_MAX=${GTT_MAX:-4000} -e RAM_MIN=${RAM_MIN:-10000} --memory 28g --memory-swap 28g -e override_vram_size=${VRAM_MB:-10240} --device-cgroup-rule='c 13:* rmw' \
   -v /dev/input:/dev/input -v /run/udev:/run/udev:ro \
   -v "$X/$W":/tmp/rt/"$W" -v "$X/pulse":/tmp/rt/pulse \
   -e XDG_RUNTIME_DIR=/tmp/rt -e WAYLAND_DISPLAY="$W" -e SDL_VIDEODRIVER=wayland -e PULSE_SERVER=unix:/tmp/rt/pulse/native \
   -v "$SRC":/src -v /mnt/games/PS4:/mnt/games/PS4 \
   -v /home/heppu/.var/app/net.shadps4.shadPS4/data/shadPS4/addcont:/home/heppu/.var/app/net.shadps4.shadPS4/data/shadPS4/addcont:ro \
   -v "$HERE/user":/home/dev/.local/share/shadPS4 -v "$HERE/out":/out \
-  shad-dev sh -c 'cd /out && exec /src/build/shadps4 -g /mnt/games/PS4/CUSA11100/eboot.bin -f false -p /home/dev/.local/share/shadPS4/patches/local/CUSA11100.xml' > "$HERE/out/play.log" 2>&1
+  shad-dev /mnt/games/PS4/bo4-dev/guard sh -c 'cd /out && exec /src/build/shadps4 -g /mnt/games/PS4/CUSA11100/eboot.bin -f false -p /home/dev/.local/share/shadPS4/patches/local/CUSA11100.xml' > "$HERE/out/play.log" 2>&1
