@@ -203,15 +203,18 @@ struct ImageResource {
 
     u32 NumTableEntries(const auto& info) const noexcept {
         return NumSharpTableEntries(GetTableSharp(info), table_stride_dw, table_offset_dw,
-                                    sizeof(AmdGpu::Image) / sizeof(u32), MAX_IMAGE_TABLE_SIZE);
+                                    is_r128 ? 4 : 8, MAX_IMAGE_TABLE_SIZE);
     }
 
     AmdGpu::Image GetTableEntry(const AmdGpu::Buffer& table, u32 index) const noexcept {
         AmdGpu::Image image{};
         const u64 offset = (u64{index} * table_stride_dw + table_offset_dw) * sizeof(u32);
-        if (offset + sizeof(image) <= table.GetSize()) {
-            std::memcpy(&image, reinterpret_cast<const void*>(table.base_address + offset),
-                        sizeof(image));
+        const u32 bytes = is_r128 ? 16 : sizeof(image);
+        if (offset + bytes <= table.GetSize()) {
+            std::memcpy(&image, reinterpret_cast<const void*>(table.base_address + offset), bytes);
+            if (is_r128) {
+                image.pitch = image.width;
+            }
         }
         return image;
     }
