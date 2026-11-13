@@ -224,6 +224,8 @@ private:
         u64 synced_generation{};
         VAddr resolved_address{};
         u64 full_hash{};
+        VAddr content_address{};
+        u64 content_size{};
         u64 verify_tick{};
         u32 verify_interval{};
         VideoCore::Image* image{};
