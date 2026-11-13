@@ -54,6 +54,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
                            BufferCache& buffer_cache_, PageManager& page_manager_)
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, liverpool{liverpool_},
       buffer_cache{buffer_cache_}, page_manager{page_manager_}, slot_images{MAX_IMAGES},
+      image_update_versions{std::make_unique<std::atomic<u64>[]>(MAX_IMAGES)},
       slot_image_views{MAX_IMAGE_VIEWS}, slot_samplers{MAX_SAMPLERS},
       blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
@@ -220,6 +221,7 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
             // We will check it's hash later to see if it really was modified.
             MarkAsMaybeDirty(image_id, image);
         }
+        image_update_versions[image_id.index].fetch_add(1, std::memory_order_release);
     }
     if (!image_ids.empty()) {
         update_generation.fetch_add(1, std::memory_order_release);
@@ -270,6 +272,7 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
             // and read it again once the range is mapped.
             std::scoped_lock image_lk{image.mutex};
             image.flags |= ImageFlagBits::CpuDirty;
+            image_update_versions[id.index].fetch_add(1, std::memory_order_release);
             update_generation.fetch_add(1, std::memory_order_release);
             UntrackImage(id);
             unmapped_images.push_back({id, image.image_uid, gc_tick});
@@ -1042,6 +1045,8 @@ void TextureCache::RegisterImage(ImageId image_id) {
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
+    image.cache_id = image_id;
+    image_update_versions[image_id.index].fetch_add(1, std::memory_order_release);
     image.memory_usage_counter = &total_used_memory;
     total_used_memory += Common::AlignUp(image.SizeBytes(), 1024);
     image_lru_cache.Insert(image, gc_tick);
@@ -1062,6 +1067,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");
     image.flags &= ~ImageFlagBits::Registered;
+    image_update_versions[image_id.index].fetch_add(1, std::memory_order_release);
     image_generation.fetch_add(1, std::memory_order_release);
     image.memory_usage_counter = nullptr;
     image_lru_cache.Free(image);

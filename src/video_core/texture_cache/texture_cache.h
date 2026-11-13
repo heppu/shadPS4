@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -356,6 +357,10 @@ public:
         return update_generation.load(std::memory_order_acquire);
     }
 
+    [[nodiscard]] u64 ImageUpdateVersion(ImageId image_id) const noexcept {
+        return image_update_versions[image_id.index].load(std::memory_order_acquire);
+    }
+
     template <typename Func>
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
         std::scoped_lock lk{registry_mutex};
@@ -457,6 +462,9 @@ private:
 
     /// Touch the image in the LRU cache.
     void NotifyImageUpdate(const Image& image) {
+        if (image.cache_id) {
+            image_update_versions[image.cache_id.index].fetch_add(1, std::memory_order_release);
+        }
         if (image.IsReadOnlyTexture()) {
             update_generation.fetch_add(1, std::memory_order_release);
         }
@@ -491,6 +499,7 @@ private:
     PageManager& page_manager;
     PageTable page_table;
     Common::SlotVector<Image> slot_images;
+    std::unique_ptr<std::atomic<u64>[]> image_update_versions;
     Common::SlotVector<ImageView> slot_image_views;
     Common::SlotVector<Sampler> slot_samplers;
     BlitHelper blit_helper;
