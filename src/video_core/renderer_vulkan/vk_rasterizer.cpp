@@ -1275,9 +1275,9 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
     if (count < 2) {
         return 0;
     }
-    table_verify_data.resize(count * ChunkSize);
+    table_verify_data.resize(desc.info.guest_size);
     if (!memory->SampleDirectBacking(desc.info.guest_address, desc.info.guest_size,
-                                     table_verify_data, count)) {
+                                     table_verify_data, 2)) {
         return 0;
     }
     table_verify_bytes += table_verify_data.size();
