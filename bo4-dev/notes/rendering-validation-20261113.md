@@ -1,12 +1,28 @@
 # BO4 Zombies rendering validation — 2026-11-13
 
-Current checkpoint (f4b2ac4c): representative Tag der Toten, Voyage and Ancient Evil gameplay
-now shows textured/lit materials, restored ship geometry, and continuous report
-hair. The Voyage GPU hang exposed by the scalar SCC fix is resolved by
-EXEC-aware first-lane selection. Voyage completes gameplay, report and return
-to lobby. This is not an all-map/full-match pass: gameplay remains about 4–6 FPS,
-higher-MRT SRC1 semantics remain unresolved, and no physical PS4 was available.
-The historical entries below retain the evidence and failures that led here.
+Current checkpoint (renderer f4b2ac4c, metadata/binary cache 17/30): all eight
+maps have representative opening-gameplay and settled-report checks on the same
+renderer build. The sampled materials remain textured and lit; missing Voyage
+geometry, black report clothing and broken hair coverage no longer reproduce.
+The Voyage GPU hang is resolved by EXEC-aware first-lane selection. RPCS3 stays
+running throughout the checks, with fresh BO4 processes and a memory watchdog.
+
+This is not full-match or all-shader certification. No complete round is claimed,
+sampled gameplay ranges roughly 1–10 FPS, and higher-MRT SRC1 semantics remain
+unresolved. Game Vulkan validation is disabled for the visual runs; separate
+homebrew/validator results are recorded below. No physical PS4 is available.
+The historical entries retain the evidence and failures that led here.
+
+| Map | Gameplay evidence | Settled report |
+| --- | --- | --- |
+| Voyage of Despair | [Forecastle](rendering-voyage-exec-fixed-20261113.png) | [Report](rendering-voyage-report-exec-fixed-20261113.png) |
+| IX | [Arena](rendering-ix-exec-fixed-20261113.png) | [Report](rendering-ix-report-exec-fixed-20261113.png) |
+| Blood of the Dead | [Laboratory](rendering-blood-budget-fixed-20261113.png) | [Report](rendering-blood-report-exec-fixed-20261113.png) |
+| Classified | [Conference Room](rendering-classified-exec-fixed-20261113.png) | [Report](rendering-classified-report-exec-fixed-20261113.png) |
+| Dead of the Night | [North Atrium Bridge](rendering-deadnight-exec-fixed-20261113.png) | [Report](rendering-deadnight-report-exec-fixed-20261113.png) |
+| Ancient Evil | [Temple of Apollo](rendering-ancient-exec-fixed-20261113.png) | [Report](rendering-ancient-report-exec-fixed-20261113.png) |
+| Alpha Omega | [Security Checkpoint](rendering-alpha-exec-fixed-20261113.png) | [Report](rendering-alpha-report-exec-fixed-20261113.png) |
+| Tag der Toten | [Docks](rendering-tag-exec-fixed-20261113.png) | [Report](rendering-tag-report-exec-fixed-20261113.png) |
 
 Earlier checkpoint: FAIL. Voyage of Despair reaches Forecastle gameplay, but the ship has missing/transparent surfaces, dark polygon patches and sometimes overbright panels. The earlier material-buffer fix restores visible wood/blood, weapon and zombie textures; it does not establish artifact-free rendering. No all-map or full-match pass is claimed.
 
@@ -1162,3 +1178,57 @@ disabled. Evidence: guarded-blood-final-memory.log and
 rendering-blood-budget-fixed-20261113.png,
 rendering-blood-report-exec-fixed-20261113.png,
 rendering-blood-lobby-exec-fixed-20261113.png.
+
+
+The earlier Tag visual run used 397e8719, before the final ReadFirstLane fix;
+its results alone cannot establish f4b2ac4c coverage. Tag is therefore repeated
+on the final renderer after visually checking its selected tile and lobby.
+Docks gameplay shows detailed snow/ice, wooden structures, reflective water,
+sunset lighting, blood decals and reflective weapon metal across movement and
+combat. The settled report retains continuous hair and textured/lit fabric,
+leather, skin and metal. Report: 3 kills, 1 headshot, 500 points, round 1, 1m36s;
+no completed round is claimed. Gameplay samples are 5–6 FPS, report 9 FPS.
+Screenshots: rendering-tag-exec-fixed-20261113.png and
+rendering-tag-report-exec-fixed-20261113.png.
+
+The 869 watchdog samples peak at 11,141 MiB combined VRAM and 2,083 MiB GTT,
+with at least 16,487 MiB available RAM. No threshold event occurs; RPCS3 remains
+running. guarded-tag-final-game.log contains zero renderer errors and critical
+messages with game Vulkan validation disabled. Samples are preserved in
+guarded-tag-final-memory.log. BO4 is then stopped intentionally to release its
+memory before the final offline metadata/SPIR-V audit and small blend probe.
+
+
+Final offline audit after the same-build Tag repeat: 2,213 current-generation
+metadata records, zero invalid resource discoveries and zero skipped records.
+All 3,339 dumped SPIR-V modules pass spirv-val for Vulkan 1.3 (older dumps are
+included). Evidence: guarded-final-audit.log, guarded-final-spirv.log,
+guarded-final-all-stages-audit.json and guarded-final-shader-validation.json.
+These are resource-discovery/module-validity checks, not proof of every game
+shader's visual output.
+
+The final binary also reruns the original mrt_src1_probe with precise readbacks,
+linear-image readback enabled, DMA enabled and Vulkan core/synchronization
+validation enabled. Unblended four-target export, ordinary MRT2 source-alpha
+and true MRT0 dual-source controls all pass. The four unknown higher-target
+SRC1 cases still leave their measured target at (0.25,0.25,0.25,0.25), its
+initialized value, and emit VUID-vkCmdDraw-maxFragmentDualSrcAttachments-09239.
+No other VUID category or critical message appears in this run. SHADTEST PASS
+means the controls passed and measurements were collected; it does not certify
+the unknown cases. Evidence: guarded-final-mrt.log.
+
+The first final-probe invocation mistakenly disabled linear-image readback,
+which this CPU pixel oracle requires. All controls then read initialization
+values. That configuration-invalid result is preserved separately as
+guarded-final-mrt-readback-disabled.log and is not treated as a renderer
+regression. The corrected invocation above uses the runner's required oracle
+settings. No emulation code or blend-warning suppression was added.
+
+Remaining correctness blocker: a trusted console measurement or authoritative
+hardware specification is needed to establish the higher-MRT secondary-source
+factor. The user has no PS4 available; invalid host Vulkan execution cannot
+supply the missing guest-hardware result. The original standalone homebrew is
+ready under hardware-tests/tests/mrt_src1_probe and in the local probe archive.
+The all-eight-map matrix establishes sampled opening/report rendering only,
+with low FPS, no completed round and no full-match stability certification.
+RPCS3 was kept running. BO4 and the final diagnostic containers have exited.
