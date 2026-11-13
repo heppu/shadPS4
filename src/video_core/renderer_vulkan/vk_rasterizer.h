@@ -84,6 +84,7 @@ public:
     void Finish();
     void OnSubmit();
     void OnFence();
+    void InvalidateImageTables();
 
     PipelineCache& GetPipelineCache() {
         return pipeline_cache;
@@ -211,6 +212,7 @@ private:
         vk::ImageView view{};
         u64 used_tick{};
         u64 synced_tick{};
+        u64 synced_generation{};
         VAddr resolved_address{};
         u64 full_hash{};
         u64 verify_tick{};
@@ -235,6 +237,7 @@ private:
         AmdGpu::ImageType type{};
         std::vector<u8> shadow;
         u64 checked_tick{};
+        u64 checked_generation{};
         s32 current_set{-1};
         bool has_unresolved{};
     };
@@ -259,6 +262,7 @@ private:
     std::vector<u64> image_table_keys;
     std::vector<vk::ImageView> image_table_views;
     std::vector<vk::DescriptorImageInfo> image_table_infos;
+    u64 table_cache_generation{};
     u64 table_resolve_tick{};
     u64 table_evict_tick{};
     u32 table_resolves{};

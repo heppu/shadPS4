@@ -433,6 +433,10 @@ void Rasterizer::OnFence() {
     texture_cache.ProcessDownloadImages();
 }
 
+void Rasterizer::InvalidateImageTables() {
+    ++table_cache_generation;
+}
+
 bool Rasterizer::BindResources(const Pipeline* pipeline) {
     if (IsComputeImageCopy(pipeline) || IsComputeMetaClear(pipeline) ||
         IsComputeImageClear(pipeline)) {
@@ -1314,8 +1318,10 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             }
         }
         if (image && !is_target(*image)) {
-            if (image_desc && entry.synced_tick != gc_tick) {
+            if (image_desc && (entry.synced_tick != gc_tick ||
+                               entry.synced_generation != table_cache_generation)) {
                 entry.synced_tick = gc_tick;
+                entry.synced_generation = table_cache_generation;
                 if (address == entry.resolved_address) {
                     texture_cache.UpdateImage(entry.image_id);
                 } else {
@@ -1342,6 +1348,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
     TableImage entry{
         .used_tick = gc_tick,
         .synced_tick = gc_tick,
+        .synced_generation = table_cache_generation,
         .resolved_address = tsharp.Address(),
         .full_hash = image_desc ? TableImageFullHash(tsharp, image_desc->table_type) : 0,
         .verify_tick = gc_tick + 1,
@@ -1557,8 +1564,10 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     // Guests alternate between copies of a table, coming back to one means it was rewritten.
     auto& last_table = last_image_tables[static_cast<size_t>(it->type)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
-    if (it->current_set < 0 || it->checked_tick != gc_tick || is_switched) {
+    if (it->current_set < 0 || it->checked_tick != gc_tick ||
+        it->checked_generation != table_cache_generation || is_switched) {
         it->checked_tick = gc_tick;
+        it->checked_generation = table_cache_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             std::memcpy(it->shadow.data(), reinterpret_cast<const void*>(address), bytes);
         } else {
