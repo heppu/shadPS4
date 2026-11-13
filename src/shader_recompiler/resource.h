@@ -180,6 +180,8 @@ struct ImageResource {
     u32 table_offset_dw{};
     u32 table_size{};
     AmdGpu::ImageType table_type{AmdGpu::ImageType::Color2D};
+    AmdGpu::NumberFormat table_number_format{AmdGpu::NumberFormat::Float};
+    bool table_is_read{};
     bool is_depth{};
     bool is_atomic{};
     bool is_array{};
@@ -224,6 +226,10 @@ struct ImageResource {
         if (IsTable()) {
             image = AmdGpu::Image::Null(is_depth);
             image.type = u64(table_type);
+            if (table_is_read) {
+                image.data_format = u64(AmdGpu::DataFormat::Format32);
+                image.num_format = u64(table_number_format);
+            }
             return image;
         }
         if (!Fetch(info.flattened_ud_buf.data(), &image)) {

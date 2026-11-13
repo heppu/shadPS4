@@ -131,11 +131,12 @@ private:
     u64 TableEpoch() const;
     void DropRemappedTableKeys();
     u64 TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
-                      bool is_depth = false);
+                      bool is_depth = false, bool is_read = false,
+                      AmdGpu::NumberFormat number_format = AmdGpu::NumberFormat::Float);
     u64 TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type);
     u64 TableImageContentHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) const;
-    vk::ImageView ResolveDepthTableImage(const AmdGpu::Image& tsharp, u64 key,
-                                         const Shader::ImageResource& image_desc);
+    vk::ImageView ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 key,
+                                       const Shader::ImageResource& image_desc);
     vk::ImageView ResolveTableImage(const AmdGpu::Image& tsharp, u64& key,
                                     const Shader::ImageResource* image_desc, bool& is_pending);
     u32 AcquireImageTableSet(u32 num_entries);
@@ -213,6 +214,7 @@ private:
         VideoCore::ImageId image_id{};
         u64 image_uid{};
         vk::ImageView view{};
+        vk::ImageLayout layout{vk::ImageLayout::eShaderReadOnlyOptimal};
         u64 used_tick{};
         u64 synced_tick{};
         u64 synced_generation{};
@@ -230,6 +232,7 @@ private:
         bool is_current{};
         std::vector<u64> keys;
         std::vector<vk::ImageView> views;
+        std::vector<vk::ImageLayout> layouts;
     };
     struct ImageTable {
         VAddr address{};
@@ -245,6 +248,8 @@ private:
         bool has_unresolved{};
         bool is_depth{};
         bool is_r128{};
+        bool is_read{};
+        AmdGpu::NumberFormat number_format{AmdGpu::NumberFormat::Float};
     };
     struct BoundImageTable {
         u32 table;
@@ -260,12 +265,13 @@ private:
     };
     std::unordered_map<u64, TableKey> table_keys;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
-    std::array<u32, 64> last_image_tables{};
+    std::array<u32, 128 * AmdGpu::NUM_NUMBER_FMTS> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
     std::vector<u64> image_table_keys;
     std::vector<vk::ImageView> image_table_views;
+    std::vector<vk::ImageLayout> image_table_layouts;
     std::vector<vk::DescriptorImageInfo> image_table_infos;
     u64 table_cache_generation{};
     u64 table_evict_tick{};
