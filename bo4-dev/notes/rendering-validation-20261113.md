@@ -765,3 +765,33 @@ r128-baseline-final.log and r128-fixed-final.log. Earlier exploratory compact
 probes contained stride/register mistakes and are not baseline evidence.
 Neighboring probes: r128-regression-*.log. Game checks with the combined query
 and compact-table fixes remain pending.
+
+
+### Runtime typed image loads
+
+The combined query/compact-table game run reached Tag with 1,036 freshly
+compiled cache records. Only fragment program 0x2f6fe911 retained an invalid
+image binding: IMAGE_LOAD from a runtime table. A bounded debugger read found
+the referenced descriptor at index 79: a 257x513 R32_UINT mask used for pixel
+discard. This identifies the binding failure without relying on a screenshot.
+
+Runtime image loads now use separate float/unsigned/signed descriptor tables,
+with planar/volume variants and array views. GPU-backed entries resolve and
+synchronize each draw; immutable sets track both image views and layouts.
+Static image specializations also distinguish signed and unsigned formats.
+Metadata/binary cache versions are 17/27.
+
+Original runtime_image_loads passes all 21 expanded cases (nine direct controls,
+twelve runtime cases including repeated GPU writes) with automatic linear
+image readback disabled and zero core/synchronization validation errors.
+Its 14 SPIR-V modules validate. The corrected pre-fix 2D baseline had 384
+runtime mismatches and a UINT/SINT descriptor type VUID. Earlier uninitialized
+probe descriptors are excluded from the baseline.
+
+Nine neighboring probes pass with zero VUID/SYNC reports: depth tables, image
+queries, compact images, mixed dimensions, updates, identity, raw buffer/image
+coherence, subrect aliases, and stencil storage aliases. Build:
+load-fix-build2.log (BUILD_EXIT=0). Evidence: load-baseline-valid.log,
+load-fixed2.log, load-spirv-validation.log, load-regression-*.log.
+The post-load-fix BO4 check is in progress; these synthetic passes alone do not
+certify all game shaders or resolve the separate higher-MRT SRC1 question.

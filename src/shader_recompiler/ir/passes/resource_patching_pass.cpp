@@ -124,7 +124,9 @@ public:
                    desc.table_size == existing.table_size &&
                    desc.table_type == existing.table_type && desc.is_array == existing.is_array &&
                    (!desc.IsTable() ||
-                    (desc.is_depth == existing.is_depth && desc.is_r128 == existing.is_r128)) &&
+                    (desc.is_depth == existing.is_depth && desc.is_r128 == existing.is_r128 &&
+                     desc.table_is_read == existing.table_is_read &&
+                     desc.table_number_format == existing.table_number_format)) &&
                    desc.mip_fallback_mode == existing.mip_fallback_mode &&
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
@@ -331,6 +333,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     const bool needs_mip_storage_fallback =
         inst_info.has_lod && is_written && !profile.supports_image_load_store_lod;
     ImageResource image_res = {
+        .table_is_read = inst.GetOpcode() == IR::Opcode::ImageRead,
         .is_depth = bool(inst_info.is_depth),
         .is_atomic = is_atomic,
         .is_array = bool(inst_info.is_array),
@@ -425,6 +428,55 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
         default:
             UNREACHABLE_MSG("Can't patch fmask instruction {}", inst.GetOpcode());
         }
+    }
+
+    if (image_res.IsTable() && image_res.table_is_read) {
+        IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
+        const auto number_format =
+            ir.BitFieldExtract(IR::U32{resource.sharps[0].dwords[1]}, ir.Imm32(26U), ir.Imm32(4U));
+        const auto type =
+            ir.BitFieldExtract(IR::U32{resource.sharps[0].dwords[3]}, ir.Imm32(28U), ir.Imm32(4U));
+        std::array<IR::Value, 4> components;
+        const bool has_volume =
+            image_res.table_type == AmdGpu::ImageType::Color2D && !image_res.is_r128;
+        for (const auto format : {AmdGpu::NumberFormat::Float, AmdGpu::NumberFormat::Uint,
+                                  AmdGpu::NumberFormat::Sint}) {
+            IR::Value texel;
+            for (u32 volume = 0; volume <= u32(has_volume); ++volume) {
+                auto typed_res = image_res;
+                typed_res.table_number_format = format;
+                if (volume) {
+                    typed_res.table_type = AmdGpu::ImageType::Color3D;
+                }
+                const auto handle = ir.IndexedImageHandle(ir.Imm32(descriptors.Add(typed_res)),
+                                                          IR::U32{image_table.index}, ir.Imm32(0U));
+                const auto loaded = ir.ImageRead(handle, inst.Arg(1), {}, {}, inst_info);
+                extra_images.push_back(loaded.Inst());
+                if (!volume) {
+                    texel = loaded;
+                } else {
+                    const auto is_volume =
+                        ir.IEqual(type, ir.Imm32(u32(AmdGpu::ImageType::Color3D)));
+                    std::array<IR::Value, 4> selected;
+                    for (u32 c = 0; c < selected.size(); ++c) {
+                        selected[c] = ir.Select(is_volume, ir.CompositeExtract(loaded, c),
+                                                ir.CompositeExtract(texel, c));
+                    }
+                    texel =
+                        ir.CompositeConstruct(selected[0], selected[1], selected[2], selected[3]);
+                }
+            }
+            for (u32 c = 0; c < components.size(); ++c) {
+                const auto value = ir.CompositeExtract(texel, c);
+                components[c] = format == AmdGpu::NumberFormat::Float
+                                    ? value
+                                    : ir.Select(ir.IEqual(number_format, ir.Imm32(u32(format))),
+                                                value, components[c]);
+            }
+        }
+        inst.ReplaceUsesWith(
+            ir.CompositeConstruct(components[0], components[1], components[2], components[3]));
+        return;
     }
 
     u32 image_binding = descriptors.Add(image_res);
