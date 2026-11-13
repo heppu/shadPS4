@@ -138,6 +138,10 @@ bool ComputePipeline::SerializationSupport::Deserialize(Serialization::Archive& 
 }
 
 bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
+    infos.fill(nullptr);
+    modules.fill(nullptr);
+    fetch_shader = nullptr;
+
     compute_key.Deserialize(ar);
 
     ComputePipeline::SerializationSupport sdata{};
@@ -152,7 +156,8 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
 
     Serialization::Archive meta_ar{std::move(meta_blob)};
 
-    if (!LoadPipelineStage(meta_ar, 0)) {
+    Shader::Backend::Bindings binding{};
+    if (!LoadPipelineStage(meta_ar, 0, binding)) {
         return false;
     }
 
@@ -206,11 +211,16 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 }
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
+    infos.fill(nullptr);
+    modules.fill(nullptr);
+    fetch_shader = nullptr;
+
     graphics_key.Deserialize(ar);
 
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
+    Shader::Backend::Bindings binding{};
     for (int stage_idx = 0; stage_idx < MaxShaderStages; ++stage_idx) {
         const auto& hash = graphics_key.stage_hashes[stage_idx];
         if (!hash) {
@@ -226,7 +236,7 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
 
         Serialization::Archive meta_ar{std::move(meta_blob)};
 
-        if (!LoadPipelineStage(meta_ar, stage_idx)) {
+        if (!LoadPipelineStage(meta_ar, stage_idx, binding)) {
             return false;
         }
     }
@@ -245,12 +255,19 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     return true;
 }
 
-bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) {
+bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage,
+                                      Shader::Backend::Bindings& binding) {
     auto program = std::make_unique<Program>();
     Shader::StageSpecialization spec{};
     spec.info = &program->info;
     size_t perm_idx{};
     if (!LoadShaderMeta(ar, program->info, spec, perm_idx)) {
+        return false;
+    }
+    if (spec.start != binding) {
+        LOG_WARNING(Render_Vulkan,
+                    "Cached stage {} of {}_{:x} has incompatible bindings, skipping preload",
+                    stage, program->info.hw_stage, program->info.pgm_hash);
         return false;
     }
 
@@ -293,6 +310,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     }
 
     infos[stage] = &it_pgm.value()->PermutInfo(perm_idx);
+    infos[stage]->AddBindings(binding);
     modules[stage] = module;
     if (auto& fetch = it_pgm.value()->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
         fetch_shader = &fetch;
