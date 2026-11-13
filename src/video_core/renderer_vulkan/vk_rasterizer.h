@@ -130,9 +130,12 @@ private:
                                          const Shader::Info& stage);
     u64 TableEpoch() const;
     void DropRemappedTableKeys();
-    u64 TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type);
+    u64 TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type,
+                      bool is_depth = false);
     u64 TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type);
     u64 TableImageContentHash(const AmdGpu::Image& tsharp, AmdGpu::ImageType table_type) const;
+    vk::ImageView ResolveDepthTableImage(const AmdGpu::Image& tsharp, u64 key,
+                                         const Shader::ImageResource& image_desc);
     vk::ImageView ResolveTableImage(const AmdGpu::Image& tsharp, u64& key,
                                     const Shader::ImageResource* image_desc, bool& is_pending);
     u32 AcquireImageTableSet(u32 num_entries);
@@ -240,6 +243,7 @@ private:
         u64 checked_generation{};
         s32 current_set{-1};
         bool has_unresolved{};
+        bool is_depth{};
     };
     struct BoundImageTable {
         u32 table;
@@ -255,7 +259,7 @@ private:
     };
     std::unordered_map<u64, TableKey> table_keys;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
-    std::array<u32, 16> last_image_tables{};
+    std::array<u32, 32> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
