@@ -1,0 +1,3 @@
+#!/bin/sh
+# usage: shot <name>   screenshot the headless session into out/<name>.png
+docker exec -e XDG_RUNTIME_DIR=/tmp/rt -e WAYLAND_DISPLAY=wayland-1 shad-run grim /out/$1.png && echo /mnt/games/PS4/bo4-dev/out/$1.png
