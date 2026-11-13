@@ -1,5 +1,13 @@
 # BO4 Zombies rendering validation — 2026-11-13
 
+Current checkpoint (f4b2ac4c): representative Tag der Toten and Voyage gameplay
+now shows textured/lit materials, restored ship geometry, and continuous report
+hair. The Voyage GPU hang exposed by the scalar SCC fix is resolved by
+EXEC-aware first-lane selection. Voyage completes gameplay, report and return
+to lobby. This is not an all-map/full-match pass: gameplay remains about 4–6 FPS,
+higher-MRT SRC1 semantics remain unresolved, and no physical PS4 was available.
+The historical entries below retain the evidence and failures that led here.
+
 Earlier checkpoint: FAIL. Voyage of Despair reaches Forecastle gameplay, but the ship has missing/transparent surfaces, dark polygon patches and sometimes overbright panels. The earlier material-buffer fix restores visible wood/blood, weapon and zombie textures; it does not establish artifact-free rendering. No all-map or full-match pass is claimed.
 
 ## Scope and evidence
@@ -957,3 +965,25 @@ runtime_compact_images, runtime_image_loads, runtime_image_queries,
 runtime_image_identity. No VUIDs are reported; intermittent
 WRITE_AFTER_PRESENT diagnostics remain recorded in the individual logs.
 The shared homebrew bundle now includes 22 ELFs. Game confirmation follows.
+
+
+Live confirmation of f4b2ac4c: normal RADV (no hang-debug flags) loads Voyage
+past the previously hanging 376efabf compute shader and reaches Forecastle.
+The run exercises movement, four pistol shots, equipment use, damage/revive,
+game over, report and return to lobby. The report records two kills, 680 points,
+1m41s of game time and round 1; no completed round is claimed. Textured decking,
+blood, ice, ship walls, lit zombie skin/clothes, weapon reflections, fog and
+emissive effects remain visible across multiple viewpoints. The report character
+has detailed clothing and continuous hair coverage. Screenshots:
+rendering-voyage-exec-fixed-20261113.png,
+rendering-voyage-effects-exec-fixed-20261113.png,
+rendering-voyage-report-exec-fixed-20261113.png.
+
+Preserved log readfirst-voyage-game.log contains zero renderer errors and zero
+critical messages; unrelated HLE stubs remain. Game Vulkan validation is off,
+so this does not clear the independently known higher-MRT blend VUID. The cache
+audit finds 796 current-generation records, zero invalid discoveries, zero
+skipped records. All 2,691 dumped SPIR-V modules pass spirv-val (older dumps are
+included). Evidence: readfirst-all-stages-audit.json and
+readfirst-shader-validation.json. The run uses a 6 GiB override and stays below
+the memory guard while RPCS3 remains running. Ancient Evil follow-up is pending.
