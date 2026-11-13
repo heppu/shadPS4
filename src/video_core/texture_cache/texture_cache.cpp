@@ -1339,6 +1339,9 @@ void TextureCache::RunGarbageCollector() {
 }
 
 void TextureCache::TouchImage(Image& image) {
+    if (image.gc_tick_touched == gc_tick) {
+        return;
+    }
     std::scoped_lock lk{registry_mutex};
     image.gc_tick_touched = gc_tick;
     image_lru_cache.Touch(image, gc_tick);
