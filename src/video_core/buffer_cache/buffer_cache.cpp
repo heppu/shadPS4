@@ -221,7 +221,8 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const bool skip_stream_buffer = True(flags & ObtainBufferFlags::IgnoreStreamBuffer);
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
     if (!is_written && !skip_stream_buffer && size <= STREAM_THRESHOLD &&
-        !IsRegionGpuModified(device_addr, size)) {
+        !IsRegionGpuModified(device_addr, size) &&
+        !texture_cache.FindImageForBuffer(device_addr, size)) {
         const auto [data, offset] = stream_buffer.Map(size, instance.UniformMinAlignment());
         memory->CopySparseMemory(device_addr, data, size);
         stream_buffer.Commit();
@@ -570,14 +571,15 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         staging.Flush();
         runtime.CopyBuffer(staging.buffer, arena, copies);
     }
-    if (is_texel_buffer && !is_written) {
-        return SynchronizeMemoryFromImage(arena, device_addr, size);
+    if (!is_written) {
+        return SynchronizeMemoryFromImage(arena, device_addr, size, is_texel_buffer);
     }
     return false;
 }
 
-bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size) {
-    if (const auto meta = texture_cache.GetMetaInfo(device_addr)) {
+bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size,
+                                             bool is_texel_buffer) {
+    if (const auto meta = texture_cache.GetMetaInfo(device_addr); meta && is_texel_buffer) {
         if (meta->type == TextureCache::MetaType::HTile) {
             static constexpr u32 ZmaskUncompressed = 0xf;
             runtime.FillBuffer(arena, arena->Offset(device_addr), size, ZmaskUncompressed);
@@ -599,14 +601,18 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
                         magic_enum::enum_name(meta->type));
         }
     }
-    const ImageId image_id = texture_cache.FindImageFromRange(device_addr, size);
+    const ImageId image_id = texture_cache.FindImageForBuffer(device_addr, size);
     if (!image_id) {
         return false;
     }
     Image& image = texture_cache.GetImage(image_id);
-    ASSERT_MSG(device_addr == image.info.guest_address,
-               "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
-               image.info.guest_address);
+    const VAddr image_addr = image.info.guest_address;
+    const u64 image_size = image.info.guest_size;
+    if (device_addr < image_addr || device_addr - image_addr >= image_size) {
+        return false;
+    }
+    const u64 image_offset = device_addr - image_addr;
+    const u64 copy_size = std::min<u64>(size, image_size - image_offset);
     const u64 arena_offset = arena->Offset(device_addr);
     boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
@@ -614,7 +620,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         const u32 width = std::max(image.info.size.width >> mip, 1u);
         const u32 height = std::max(image.info.size.height >> mip, 1u);
         const u32 depth = std::max(image.info.size.depth >> mip, 1u);
-        if (arena_offset + mip_info.offset + mip_info.size > arena->size_bytes) {
+        if (mip_info.offset + mip_info.size > image_size) {
             break;
         }
         buffer_copies.push_back(vk::BufferImageCopy{
@@ -635,7 +641,19 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         return false;
     }
     auto& tile_manager = texture_cache.GetTileManager();
-    tile_manager.TileImage(image, buffer_copies, arena, arena_offset);
+    if (image_offset == 0 && copy_size == image_size) {
+        tile_manager.TileImage(image, buffer_copies, arena, arena_offset);
+    } else {
+        const auto staging =
+            staging_pool.Request(image_size, MemoryType::DeviceLocal, 256, false, true);
+        tile_manager.TileImage(image, buffer_copies, staging.buffer, staging.offset);
+        const vk::BufferCopy copy{
+            .srcOffset = staging.offset + image_offset,
+            .dstOffset = arena_offset,
+            .size = copy_size,
+        };
+        runtime.CopyBuffer(staging.buffer, arena, std::span{&copy, 1});
+    }
     return true;
 }
 
