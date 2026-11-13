@@ -89,7 +89,8 @@ public:
 
     bool LoadComputePipeline(Serialization::Archive& ar);
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
-    bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);
+    bool LoadPipelineStage(Serialization::Archive& ar, size_t stage,
+                           Shader::Backend::Bindings& binding);
 
     const GraphicsPipeline* GetGraphicsPipeline(const DrawIndirectParams params = {});
 
