@@ -13,7 +13,7 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 23u;
-static constexpr u32 ShaderMetaVersion = 15u;
+static constexpr u32 ShaderMetaVersion = 16u;
 static constexpr u32 PipelineKeyVersion = 5u;
 } // namespace Serialization
 
@@ -70,6 +70,7 @@ void RegisterShaderMeta(const Shader::Info& info,
 
     meta.Write(Serialization::ShaderMetaVersion);
     meta.Write(Serialization::ShaderBinaryVersion);
+    meta.Write(EmulatorSettings.IsDirectMemoryAccessEnabled());
 
     meta.Write(perm_hash);
     meta.Write(perm_idx);
@@ -104,6 +105,12 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     u32 binary_version{};
     meta.Read(binary_version);
     if (binary_version != Serialization::ShaderBinaryVersion) {
+        return false;
+    }
+
+    bool direct_memory_access{};
+    meta.Read(direct_memory_access);
+    if (direct_memory_access != EmulatorSettings.IsDirectMemoryAccessEnabled()) {
         return false;
     }
 
