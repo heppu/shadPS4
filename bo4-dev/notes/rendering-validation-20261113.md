@@ -505,3 +505,30 @@ startup-green-root-cause.txt, subrect-format-{baseline,fixed,build}.log and
 subrect-format-*-regression.log. The earlier capture attempt was interrupted by
 GDB stopping on an emulator-handled guest fault; the corrected debugger settings
 preserved normal fault handling and produced the complete capture.
+
+
+## Follow-up: Classified and a post-map lobby artifact
+
+Classified reaches the Conference Room on f7fa1e83 with detailed furniture,
+curtains, flags, weapon materials, working surveillance screens and light beams.
+Two inspected views show no matte-grey replacement; firing reduces ammunition
+from 8 to 7. These samples report about 8–9 FPS and are not a performance or
+full-map pass. Local images: out/classified-{entry,side}.png. Log:
+out/ship-fix/classified-fixed-gameplay.log.
+
+Returning to the lobby exposes a separate persistent bright-magenta fire
+reflection. Screenshots before and after a five-second wait retain the artifact.
+The startup is clean, so the movie fix does not certify map-unload behavior.
+Local evidence: out/classified-return-magenta.png and
+out/ship-fix/classified-return-magenta.log. Root cause is still under investigation.
+
+A capture-enabled repeat starts with a clean lobby and also returns cleanly on
+its first transition. The original return artifact therefore is not yet a
+deterministic reproducer. A correct reference frame is saved locally as
+out/ship-fix/classified-fresh-lobby.rdc. No speculative resource-cache change has
+been made.
+
+SPIR-V validation with --target-env vulkan1.3 passes all 2,001 dumped modules in
+the diagnostic directory, including 32 newly dumped since this capture run
+started. This validates module structure, not complete rendering semantics.
+Detailed results: out/ship-fix/magenta-shader-validation.json.
