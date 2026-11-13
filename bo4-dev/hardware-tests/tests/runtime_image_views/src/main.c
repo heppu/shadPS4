@@ -74,12 +74,14 @@ int main(void) {
     table.stride = sizeof(GnmTexture);
     table.numrecords = 2;
     GnmSampler sampler = {0};
-    StCase cases[5] = {{.name = "initial"},
+    StCase cases[7] = {{.name = "initial"},
                        {.name = "cpu_update"},
                        {.name = "descriptor_swap"},
                        {.name = "submit_boundary"},
+                       {.name = "remap_shared_views"},
+                       {.name = "repeat_shared_views"},
                        {.name = "guards"}};
-    for (unsigned phase = 0; phase < 4; ++phase) {
+    for (unsigned phase = 0; phase < 6; ++phase) {
         if (phase == 1) {
             for (unsigned i = 0; i < sizes[0] / 4; ++i)
                 pixels[0][i] = .625f + .125f * (i % 4);
@@ -89,6 +91,18 @@ int main(void) {
             GnmTexture tmp = textures[0];
             textures[0] = textures[1];
             textures[1] = tmp;
+            st_store_fence();
+        }
+        if (phase == 4) {
+            off_t replacement;
+            void* address = pixels[0];
+            if (sceKernelMunmap(address, sizes[0]) != 0 ||
+                !st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), sizes[0],
+                                  ST_DMEM_PAGE_BYTES, &replacement) ||
+                !st_dmem_map(&address, sizes[0], replacement, true))
+                return st_fail("reason=remap_shared_views");
+            for (unsigned i = 0; i < sizes[0] / 4; ++i)
+                pixels[0][i] = 1.f + .125f * (i % 4);
             st_store_fence();
         }
         if (phase == 3 && sceGnmSubmitDone() < 0)
@@ -111,18 +125,19 @@ int main(void) {
             return st_fail("reason=submit");
         for (unsigned i = 0; i < 144; ++i) {
             uint32_t expected = 0xdeadbeef;
-            unsigned which = 4;
+            unsigned which = 6;
             if (i >= 8 && i < 136) {
                 unsigned group = (i - 8) / 64;
                 which = phase;
                 float value = phase == 0   ? (group ? .25f : .125f)
                               : phase == 1 ? (group ? .75f : .625f)
-                                           : (group ? .625f : .75f);
+                                           : phase < 4 ? (group ? .625f : .75f)
+                                          : (group ? 1.f : 1.125f);
                 memcpy(&expected, &value, 4);
             }
             st_case_expect(&cases[which], "word", i, expected, output[i]);
         }
     }
     sceGnmSubmitDone();
-    return st_finish_cases(cases, 5, "cpu_update=1 descriptor_swap=1 submit_boundary=1 guards=1");
+    return st_finish_cases(cases, 7, "cpu_update=1 descriptor_swap=1 submit_boundary=1 remap_shared_views=1 repeat_shared_views=1 guards=1");
 }

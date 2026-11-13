@@ -11,3 +11,8 @@ Build with `make -C tests/runtime_image_views`. Run with
 `python3 scripts/run-test.py runtime_image_views --shadps4 /path/to/shadps4 --timeout 60`.
 The ELF is `out/runtime_image_views/runtime_image_views.elf`. No physical PS4
 execution has been performed.
+
+Two additional phases replace the shared allocation at the same virtual address
+and repeat the unchanged descriptor-table read. Both channel views must return
+the replacement pixels, including on the repeated read. All samples and guards
+are checked.
