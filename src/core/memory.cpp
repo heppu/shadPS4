@@ -100,7 +100,8 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
              total_flexible_size, total_direct_size);
 }
 
-bool MemoryManager::SampleDirect(VAddr virtual_addr, u64 size, std::span<u8> dest, u64 count) {
+bool MemoryManager::SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<u8> dest,
+                                        u64 count) {
     if (count < 2) {
         return false;
     }
@@ -115,7 +116,7 @@ bool MemoryManager::SampleDirect(VAddr virtual_addr, u64 size, std::span<u8> des
         if (vma->second.type != VMAType::Direct || False(vma->second.prot & MemoryProt::CpuRead)) {
             return false;
         }
-        std::memcpy(dest.data(), reinterpret_cast<const void*>(virtual_addr), size);
+        CopySparseMemory(virtual_addr, dest.data(), size);
         return true;
     }
     for (u64 i = 0; i < count; ++i) {
@@ -127,8 +128,7 @@ bool MemoryManager::SampleDirect(VAddr virtual_addr, u64 size, std::span<u8> des
             False(vma->second.prot & MemoryProt::CpuRead)) {
             return false;
         }
-        std::memcpy(dest.data() + i * sample_size, reinterpret_cast<const void*>(address),
-                    sample_size);
+        CopySparseMemory(address, dest.data() + i * sample_size, sample_size);
     }
     return true;
 }
