@@ -540,6 +540,52 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     }
 }
 
+void Runtime::CopyStencil(VideoCore::Image* src, VideoCore::Image* dst) {
+    ASSERT(src->info.num_samples == 1 && dst->info.num_samples == 1);
+    const auto extent = vk::Extent3D{std::min(src->info.size.width, dst->info.size.width),
+                                     std::min(src->info.size.height, dst->info.size.height), 1};
+    const u32 layers = std::min(src->info.resources.layers, dst->info.resources.layers);
+    const u64 size = u64{extent.width} * extent.height * layers;
+    const auto copy = staging_pool.Request(size, VideoCore::MemoryType::DeviceLocal, 4);
+    const auto aspect = [](const VideoCore::Image* image) {
+        return image->info.props.is_depth ? vk::ImageAspectFlagBits::eStencil
+                                          : vk::ImageAspectFlagBits::eColor;
+    };
+    vk::BufferImageCopy region{
+        .bufferOffset = copy.offset,
+        .imageSubresource = {.aspectMask = aspect(src), .layerCount = layers},
+        .imageExtent = extent,
+    };
+
+    SetBackingSamples(src, 1);
+    SetBackingSamples(dst, 1);
+    scheduler.EndRendering();
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
+                vk::AccessFlagBits2::eTransferRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
+                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    needs_flush |= IsBufferAccessed(copy.buffer, copy.offset, size, true);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+    const auto cmdbuf = scheduler.CommandBuffer();
+    cmdbuf.copyImageToBuffer(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal,
+                             copy.buffer->Handle(), region);
+    AccessBuffer(copy.buffer, copy.offset, size, vk::PipelineStageFlagBits2::eCopy,
+                 vk::AccessFlagBits2::eTransferWrite);
+    if (IsBufferAccessed(copy.buffer, copy.offset, size)) {
+        FlushBarriers();
+    }
+    region.imageSubresource.aspectMask = aspect(dst);
+    cmdbuf.copyBufferToImage(copy.buffer->Handle(), dst->GetImage(),
+                             vk::ImageLayout::eTransferDstOptimal, region);
+    AccessBuffer(copy.buffer, copy.offset, size, vk::PipelineStageFlagBits2::eCopy,
+                 vk::AccessFlagBits2::eTransferRead);
+    dst->flags |= src->flags & VideoCore::ImageFlagBits::GpuModified;
+    dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
+}
+
 void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                                const VideoCore::SubresourceRange& sub_range) {
     scheduler.EndRendering();

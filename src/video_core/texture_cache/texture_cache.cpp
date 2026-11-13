@@ -630,12 +630,20 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     ImageId image_id{};
 
+    ImageId stencil_depth_id{};
+    u64 stencil_depth_uid{};
     ImageId subrect_source{};
     // Check for a perfect match first
     for (const auto& cache_id : image_ids) {
         auto& cache_image = slot_images[cache_id];
         if (cache_image.info.guest_address != info.guest_address) {
             continue;
+        }
+        if (Vulkan::LiverpoolToVK::IsFormatStencilCompatible(info.pixel_format)) {
+            if (const auto depth_id = GetAssociatedDepth(cache_image)) {
+                stencil_depth_id = depth_id;
+                stencil_depth_uid = cache_image.depth_uid;
+            }
         }
         if (desc.IsSubrectTexture(cache_image.info) && cache_image.HasGpuValidData()) {
             subrect_source = cache_id;
@@ -698,6 +706,10 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
 
     Image& image = slot_images[image_id];
+    if (stencil_depth_id && slot_images.IsAllocated(stencil_depth_id) &&
+        slot_images[stencil_depth_id].image_uid == stencil_depth_uid) {
+        image.AssociateDepth(stencil_depth_id, stencil_depth_uid);
+    }
     image.tick_accessed_last = scheduler.CurrentTick();
     TouchImage(image);
 
