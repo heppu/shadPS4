@@ -664,7 +664,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         image_id = cache_id;
     }
 
-    if (!image_id) {
+    if (subrect_source && (!image_id || !slot_images[image_id].HasGpuValidData())) {
         image_id = subrect_source;
     }
 
