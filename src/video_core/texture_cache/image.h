@@ -105,6 +105,11 @@ struct Image : public Common::LRUNode<> {
         return track_addr == 0 || track_addr_end == 0;
     }
 
+    bool IsReadOnlyTexture() const {
+        return usage.texture && !usage.storage && !usage.render_target && !usage.depth_target &&
+               False(flags & ImageFlagBits::GpuModified);
+    }
+
     bool HasGpuValidData() const {
         return True(flags & ImageFlagBits::GpuModified) && False(flags & ImageFlagBits::Dirty);
     }

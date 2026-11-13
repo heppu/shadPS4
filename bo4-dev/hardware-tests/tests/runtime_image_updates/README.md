@@ -19,3 +19,9 @@ python3 scripts/run-test.py runtime_image_updates --shadps4 /path/to/shadps4 --t
 The ELF is `out/runtime_image_updates/runtime_image_updates.elf`. No video flip
 is needed. Both CPU writes and descriptor replacement occur only after the
 prior GPU completion label; cache invalidation precedes each new dispatch.
+
+The physical-alias phase maps the arena a second time before any draw, then
+writes both textures through that previously unused mapping. After SubmitDone,
+the unchanged descriptors still address the first mapping and must sample the
+new values (0.625 and 0.875). This checks CPU-backing verification without
+replacing the original same-frame CPU-update and descriptor-swap controls.
