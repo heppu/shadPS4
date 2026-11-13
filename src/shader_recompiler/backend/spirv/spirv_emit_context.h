@@ -365,6 +365,8 @@ public:
     struct BufferDefinition {
         u32 binding;
         BufferType buffer_type;
+        Id table_load{};
+        Id table_store{};
         std::array<Id, u32(PointerSize::NumClass)> offsets;
         std::array<BufferSpv, u32(PointerType::NumAlias)> aliases;
 
@@ -430,6 +432,7 @@ private:
     void DefineOutputs();
     void DefinePushDataBlock();
     void DefineBuffers();
+    Id DefineBufferTableAccess(u32 handle, bool write);
     void DefineImagesAndSamplers();
     void DefineSharedMemory();
     void DefineFunctions();
