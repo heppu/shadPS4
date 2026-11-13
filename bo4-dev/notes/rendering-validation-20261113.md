@@ -380,3 +380,33 @@ buffer label; no texture-resolution stall was observed.
 The presentation warning also occurs with upstream Vulkan-ValidationLayers
 37ec2baf9aac8c0f55fe2b9beec1d818b70d7841 (API 1.4.368) in the mip/subrectangle
 probe. Updating the validator alone does not resolve it. Investigation continues.
+
+
+## Follow-up: Alpha Omega live material checkpoint
+
+On 8686f232, Alpha Omega reaches Security Checkpoint with textured buildings,
+road, fencing, foliage and skin, reflective gun metal, animated fire and smoke.
+Turning and firing work (ammo 8 to 7). The settled second view reports about
+13 FPS; the immediate post-pause sample reads 1 FPS and is not a steady-state
+measurement. Damage/blood appears after waiting near a zombie. These are two
+entry-area views, not a full-match or all-map certification.
+
+Saved image: rendering-alpha-omega-first-use-20261113.png. Local evidence:
+out/alpha-first-use-{first,side,settled}.png and
+out/ship-fix/alpha-first-use-gameplay.log. The IX second angle also shows a
+textured zombie close up, cloth, skin and reflective weapon metal:
+out/first-use-ix-side.png. No new DMA compilation diagnostics were observed;
+no causal attribution to DMA alone is made.
+
+Presentation investigation: a new original presentation_idle homebrew performs
+no guest rendering and passes 121 host presents without validation warnings.
+The mip probe can reproduce WRITE-AFTER-PRESENT after its successful pixel
+marker if allowed to continue until swapchain image reuse. The installed and
+isolated upstream validators both report it. The traced acquire semaphore and
+present wait are present, and image extent/format agree with the render area.
+Reduced native Vulkan cases (binary/timeline waits, shared and separate
+timelines, mailbox/FIFO, pacing, dynamic rendering, sparse-bind synchronization
+and concurrent queue work) have not reproduced it. This remains unresolved;
+no suppression or speculative workaround is applied. Local diagnostic sources
+and logs remain under out/ship-fix/present-*. The idle and allocation controls
+are still being narrowed before their sources are finalized.
