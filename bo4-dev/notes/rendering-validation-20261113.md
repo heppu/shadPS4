@@ -251,3 +251,20 @@ is pending. The data checks are emulator results, not physical-console results.
 
 Evidence: out/ship-fix/image-identity-baseline.log, image-identity-fixed-*.log
 and image-identity-fix-build.log.
+
+
+The combined cache fixes reach IX gameplay with core and synchronization
+validation enabled and no reports (image-identity-ix-gameplay.log). The normal
+run with RenderDoc and validation disabled reaches the arena and preserves
+textured stone/wood, colored banners, lit skin and reflective weapon metal from
+several angles. `rendering-ix-cache-fixes-20261113.png` preserves that build.
+The weapon fires and its ammo decreases; consecutive live frames retain material
+detail through damage and the downed-state overlay. One frame grabbed immediately
+after an emulator pause/resume had black surfaces, which cleared after settling;
+the subsequent 16-frame unpaused sample does not reproduce them. This is not
+proof that every temporal artifact is resolved.
+
+Normal title/menu performance is about 27–34 FPS; the sampled IX gameplay views
+are around 10–15 FPS, so no full-speed claim is made. The VRAM guard remains
+untriggered at about 10.1 GB. Local frames: out/normal-ix-*.png and
+out/ship-fix/live-frames/*.png. Additional map/effect validation continues.
