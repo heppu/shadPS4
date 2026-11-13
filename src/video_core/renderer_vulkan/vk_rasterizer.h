@@ -141,7 +141,8 @@ private:
     vk::ImageView ResolveTableImage(const AmdGpu::Image& tsharp, u64& key,
                                     const Shader::ImageResource* image_desc, bool& is_pending);
     u32 AcquireImageTableSet(u32 num_entries);
-    void BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc);
+    void BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc,
+                            bool refresh_all = true);
     vk::DescriptorSet GetImageTableSet(const Shader::ImageResource& image_desc,
                                        const Shader::Info& stage);
     void ValidateImageTableSets();
@@ -258,6 +259,7 @@ private:
         u64 key{};
         u64 key_tick{};
         u64 key_generation{};
+        bool is_dynamic{true};
     };
     struct ImageTable {
         VAddr address{};
