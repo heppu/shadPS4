@@ -1266,7 +1266,6 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
 vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& key,
                                             const Shader::ImageResource* image_desc,
                                             bool& is_pending) {
-    static constexpr u32 MaxResolvesPerTick = 48;
     const auto is_target = [](const VideoCore::Image& image) {
         return image.usage.render_target || image.usage.depth_target;
     };
@@ -1337,15 +1336,10 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         }
         table_images.erase(it);
     }
-    if (table_resolve_tick != gc_tick) {
-        table_resolve_tick = gc_tick;
-        table_resolves = 0;
-    }
-    if (!image_desc || table_resolves >= MaxResolvesPerTick) {
+    if (!image_desc) {
         is_pending = true;
         return {};
     }
-    ++table_resolves;
 
     TableImage entry{
         .used_tick = gc_tick,

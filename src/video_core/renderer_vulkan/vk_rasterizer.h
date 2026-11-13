@@ -263,9 +263,7 @@ private:
     std::vector<vk::ImageView> image_table_views;
     std::vector<vk::DescriptorImageInfo> image_table_infos;
     u64 table_cache_generation{};
-    u64 table_resolve_tick{};
     u64 table_evict_tick{};
-    u32 table_resolves{};
     u32 table_steals{};
     u64 table_verify_tick{};
     u64 table_verify_bytes{};
