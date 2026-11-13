@@ -163,6 +163,11 @@ void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
 bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
                       vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                       std::optional<VideoCore::SubresourceRange> subres_range) {
+    const auto handle = image->backing->image.image;
+    if (std::ranges::any_of(image_barriers,
+                            [handle](const auto& barrier) { return barrier.image == handle; })) {
+        FlushBarriers();
+    }
     const size_t prev_num_barriers = static_cast<size_t>(image_barriers.size());
     if (dst_access & vk::AccessFlagBits2::eTransferWrite) {
         image->InvalidateSubrects();
