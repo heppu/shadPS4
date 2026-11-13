@@ -2153,6 +2153,10 @@ Value IREmitter::ImageHandle(const Value& tsharp_low, const Value& tsharp_high) 
     return Inst(Opcode::ImageHandle, tsharp_low, tsharp_high);
 }
 
+Value IREmitter::IndexedBufferHandle(const U32& binding, const U32& index) {
+    return Inst(Opcode::IndexedBufferHandle, binding, index);
+}
+
 Value IREmitter::IndexedImageHandle(const U32& binding, const U32& image_index,
                                     const U32& sampler_index) {
     return Inst(Opcode::IndexedImageHandle, binding, image_index, sampler_index);
