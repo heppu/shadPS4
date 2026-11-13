@@ -469,3 +469,39 @@ The installed validator (1.4.363) also reproduces the native sparse timeline
 false positive, with zero errors in its binary and ordinary-submit controls.
 Final presentation_compute shader values pass while its presentation diagnostic
 remains; presentation_idle passes with zero core/sync reports.
+
+
+## Fix: cropped views of compatible image formats
+
+The startup green frame is caused by disconnected aliases of the decoded video
+planes. A captured draw samples 1920×1080 R8_UNORM and 960×540 R8G8_UNORM images
+containing only zero. At the same guest addresses, compute-written 1920×1088
+R8_UINT and 960×544 R8G8_UINT images contain valid luma/chroma data. For example,
+luma spans 16–229 while its sampled alias stays zero. Guest memory remains zero
+because the decoder produces these planes on the GPU.
+
+Subrectangle recognition required identical formats, so it rejected the valid
+UINT/UNORM aliases. It now uses the existing Vulkan format-compatibility check
+while retaining the layout, pitch, tile, bit-size and resource restrictions.
+When a cropped CPU-backed image already exists, a compatible larger image with
+valid GPU data takes precedence. Existing subrectangle copies preserve the
+requested dimensions and reinterpretation view. No title or shader is special
+cased.
+
+Original subrect_format_alias homebrew reproduces the first R8 read returning
+zero instead of 1.0 on baseline 12b9493b. The fix passes R8/R8G8, two GPU writes,
+optional prior cropped reads, cropped dimensions and guards, with zero core/sync
+reports. Mip subrectangles, writable stencil aliases and mixed 2D/3D runtime
+image regressions also pass with zero reports. Build and diff checks pass.
+
+The live startup sequence now shows animated characters, scenery and the logo
+instead of a solid green screen, then reaches the title normally. Saved image:
+rendering-startup-video-fixed-20261113.png. Local frame sequence:
+out/ship-fix/startup-fixed/. The bounded observation is not an all-video or
+full-match certification; higher-MRT SRC1 semantics remain unresolved.
+
+Evidence: out/ship-fix/startup-green.rdc, green-plane-aliases.txt,
+startup-green-root-cause.txt, subrect-format-{baseline,fixed,build}.log and
+subrect-format-*-regression.log. The earlier capture attempt was interrupted by
+GDB stopping on an emulator-handled guest fault; the corrected debugger settings
+preserved normal fault handling and produced the complete capture.
