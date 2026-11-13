@@ -1429,3 +1429,15 @@ An offline replay of current-20261113.rdc completed within existing memory guard
 The sum of per-event GPU durations was 26.42 ms, spread across thousands of draws
 and copies; no single expensive shader dominated. This older captured frame and
 instrumented replay are not a current native frame-time measurement.
+
+### Remap experiment rollback
+
+The 868235c5 executable reached a missing-character lobby and deteriorated to
+0.15 FPS over 20 seconds, with approximately 100% GPU busy and 10.5% rendering
+thread CPU. The saved revisions-only executable, with identical settings,
+rendered the lobby character at about 38 FPS and completed a gameplay run at
+14.03 FPS. This is evidence against retaining the remap narrowing; its exact
+failure mechanism has not been isolated. Restore conservative remap invalidation
+and retain per-image update revisions. The new remap homebrew remains useful.
+The control gameplay route again entered water and ended shortly after one
+minute; subsequent comparisons will use IX rather than this route.
