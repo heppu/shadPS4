@@ -8,6 +8,7 @@
 #include "video_core/amdgpu/resource.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/tile.h"
 #include "video_core/texture_cache/types.h"
 
@@ -69,10 +70,10 @@ struct ImageInfo {
             type == info.type && resources.levels <= info.resources.levels &&
             resources.layers == 1 && info.resources.layers == 1 && !props.is_depth &&
             !info.props.is_depth && !props.is_block && !info.props.is_block &&
-            pixel_format == info.pixel_format && num_bits == info.num_bits &&
-            num_samples == info.num_samples && pitch == info.pitch && tile_mode == info.tile_mode &&
-            bank_swizzle == info.bank_swizzle && alt_tile == info.alt_tile &&
-            mips_layout[0].pitch == info.mips_layout[0].pitch;
+            IsVulkanFormatCompatible(info.pixel_format, pixel_format) &&
+            num_bits == info.num_bits && num_samples == info.num_samples && pitch == info.pitch &&
+            tile_mode == info.tile_mode && bank_swizzle == info.bank_swizzle &&
+            alt_tile == info.alt_tile && mips_layout[0].pitch == info.mips_layout[0].pitch;
         if (!compatible) {
             return false;
         }
