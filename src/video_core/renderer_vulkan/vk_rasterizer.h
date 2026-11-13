@@ -275,7 +275,6 @@ private:
         std::vector<ImageTableEntry> entries;
         u64 checked_tick{};
         u64 checked_generation{};
-        u64 checked_key_generation{};
         u64 checked_update_generation{};
         u64 checked_state_generation{};
         s32 current_set{-1};
