@@ -112,11 +112,25 @@ bool MemoryManager::SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<
         return false;
     }
     auto vma = FindVMA(virtual_addr);
-    if (size == sample_size * count && vma->second.Contains(virtual_addr, size)) {
-        if (vma->second.type != VMAType::Direct || False(vma->second.prot & MemoryProt::CpuRead)) {
-            return false;
+    if (size == dest.size()) {
+        u64 copied = 0;
+        while (copied < size) {
+            const auto& area = vma->second;
+            if (area.type != VMAType::Direct || False(area.prot & MemoryProt::CpuRead)) {
+                return false;
+            }
+            const u64 offset = virtual_addr + copied - area.base;
+            const u64 copy_size = std::min(size - copied, area.size - offset);
+            const u64 expected = copied + copy_size;
+            vma->second.ForEachPhysArea(offset, copy_size, [&](PAddr address, u64 bytes) {
+                std::memcpy(dest.data() + copied, impl.BackingBase() + address, bytes);
+                copied += bytes;
+            });
+            if (copied != expected) {
+                return false;
+            }
+            ++vma;
         }
-        CopySparseMemory(virtual_addr, dest.data(), size);
         return true;
     }
     for (u64 i = 0; i < count; ++i) {
