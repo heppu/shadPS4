@@ -316,7 +316,8 @@ static bool UsesCubeFaceMath(const IR::Inst& inst) {
 }
 
 void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors& descriptors,
-                     const Profile& profile) {
+                     const Profile& profile,
+                     boost::container::small_vector<IR::Inst*, 16>& extra_images) {
     IR::Inst& inst = *resource.user;
 
     // Read image sharp.
@@ -466,6 +467,32 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     inst.SetArg(0, ir.IndexedImageHandle(ir.Imm32(binding),
                                          image_index.IsEmpty() ? zero : IR::U32{image_index},
                                          sampler_index.IsEmpty() ? zero : IR::U32{sampler_index}));
+    if (image_res.IsTable() && image_res.table_type == AmdGpu::ImageType::Color2D &&
+        !image_res.is_depth && !inst_info.is_gather &&
+        inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
+        auto volume_res = image_res;
+        volume_res.table_type = AmdGpu::ImageType::Color3D;
+        const u32 volume_binding = descriptors.Add(volume_res) | (binding & 0xffff0000U);
+        const auto volume_handle =
+            ir.IndexedImageHandle(ir.Imm32(volume_binding), IR::U32{image_index},
+                                  sampler_index.IsEmpty() ? zero : IR::U32{sampler_index});
+        const auto planar = ir.ImageSampleRaw(inst.Arg(0), inst.Arg(1), inst.Arg(2), inst.Arg(3),
+                                              inst.Arg(4), inst.Arg(5), inst_info);
+        const auto volume = ir.ImageSampleRaw(volume_handle, inst.Arg(1), inst.Arg(2), inst.Arg(3),
+                                              inst.Arg(4), inst.Arg(5), inst_info);
+        const auto type =
+            ir.BitFieldExtract(IR::U32{resource.sharps[0].dwords[3]}, ir.Imm32(28U), ir.Imm32(4U));
+        const auto is_volume = ir.IEqual(type, ir.Imm32(u32(AmdGpu::ImageType::Color3D)));
+        std::array<IR::Value, 4> components;
+        for (u32 component = 0; component < components.size(); ++component) {
+            components[component] = ir.Select(is_volume, ir.CompositeExtract(volume, component),
+                                              ir.CompositeExtract(planar, component));
+        }
+        inst.ReplaceUsesWith(
+            ir.CompositeConstruct(components[0], components[1], components[2], components[3]));
+        extra_images.push_back(planar.Inst());
+        extra_images.push_back(volume.Inst());
+    }
 }
 
 static std::pair<IR::Value, bool> IsMbcntWithExec(IR::Value value, IR::U1 exec) {
@@ -1079,12 +1106,13 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
     // Iterate over discovered resources and patch them after finding the sharp.
     // Pass 1: Track resource sharps
     Descriptors descriptors{info};
+    boost::container::small_vector<IR::Inst*, 16> extra_images;
     for (const auto& usage : resources) {
         IR::Inst& inst = *usage.user;
         if (IsBufferInstruction(inst)) {
             PatchBufferSharp(usage, info, descriptors, profile);
         } else if (IsImageInstruction(inst)) {
-            PatchImageSharp(usage, info, descriptors, profile);
+            PatchImageSharp(usage, info, descriptors, profile, extra_images);
         }
     }
 
@@ -1098,6 +1126,9 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
         } else if (IsDataRingInstruction(inst)) {
             PatchGlobalDataShareAccess(inst, info, descriptors, profile);
         }
+    }
+    for (auto* inst : extra_images) {
+        PatchImageArgs(*inst, info);
     }
 }
 

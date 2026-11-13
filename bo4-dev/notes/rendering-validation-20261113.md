@@ -143,4 +143,33 @@ PS4 validation is unavailable; these are emulator results.
 Local evidence: out/ship-fix/stencil-probe-baseline.log,
 stencil-association-test.log, stencil-dispatch.rdc and stencil-dispatch2.rdc.
 The captures isolated the missing first-use association. The temporary capture
-hooks were removed before the passing build. Live IX verification is in progress.
+hooks were removed before the passing build. The subsequent live IX run reaches gameplay with zero Vulkan validation errors.
+The frame remains too dark, which was traced separately below.
+
+
+## Follow-up: runtime volume texture tables
+
+The IX capture `out/ship-fix/ix-stencil-fixed.rdc` has valid textured geometry and
+normal/material buffers. Lighting dispatch 8501 (shader a1f741f9) reaches visible
+pixels, but accumulated environment lighting is zero. The probe weight is 1, so
+the shader suppresses fallback lighting. AO and transmission are nonzero;
+removing denormal flushing does not fix it. Table entries 54–67 are absent from
+the 2D table, while the corresponding cube entries 40–53 are present. Guest
+descriptor logging confirms BC6 volume images were rejected as 2D table entries.
+
+Dynamic sampled tables now include a 3D image table. The shader reads the actual
+image type from descriptor word 3 and selects the correctly dimensioned sample,
+preserving Z and keeping mixed 2D/3D tables valid. Table identity, hashing and
+switch tracking distinguish volume images. Shader binary version is increased
+so old compiled sampling paths are rebuilt. Temporary descriptor logging and
+all replay shader substitutions are excluded from production source.
+
+The independent `runtime_image_dimensions` homebrew passes 2D reads and guards
+on the baseline, but returns zero for all 64 volume reads. The fixed build passes
+all cases, including alternating Z slices. The stencil, mip-subrectangle and
+runtime buffer-table probes also pass. All four run with core and synchronization
+validation and have zero VUID reports. Build and diff checks pass. Live IX visual
+verification of the volume change is in progress.
+
+Evidence: out/ship-fix/ix-lighting-investigation.log, ix-table1.json, ix-table2.json,
+volume-table-descriptors.log, volume-probe-baseline.log and volume-regression-*.log.
