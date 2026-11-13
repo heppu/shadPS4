@@ -184,6 +184,7 @@ public:
     BackingImage* backing{};
     u64* memory_usage_counter{};
     u64 image_uid{};
+    ImageId cache_id{};
     u64 lru_id{};
     u64 tick_accessed_last{};
     u64 gc_tick_touched{};
