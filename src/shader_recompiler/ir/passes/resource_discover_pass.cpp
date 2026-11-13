@@ -580,7 +580,6 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
     }
 
     auto& image_table = resource.tables[0];
-    const auto inst_info = inst.Flags<IR::TextureInstInfo>();
     if (inst.GetOpcode() == IR::Opcode::ImageQueryDimensions && tsharp.num_dwords == 8 &&
         tsharp.post_op == SharpFetchPostOp::None) {
         DiscoverSharpTable(tsharp, image_table);
@@ -591,7 +590,7 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
         }
     }
     if (profile.max_image_table_size != 0 && inst.GetOpcode() == IR::Opcode::ImageSampleRaw &&
-        tsharp.post_op == SharpFetchPostOp::None && !inst_info.is_r128) {
+        tsharp.post_op == SharpFetchPostOp::None) {
         DiscoverSharpTable(tsharp, image_table);
     }
     MarkReadConstBufferSharpSources(image_table.index.IsEmpty() ? tsharp : image_table.sharp);
