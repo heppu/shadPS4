@@ -206,3 +206,29 @@ A separate bright purple ground reflection appeared in the lobby after returning
 from IX, then disappeared after capture. `out/ship-fix/lobby-reflection.rdc` and
 `out/volume-mutation-lobby.png` preserve that investigation; cause is not yet
 established. The player portrait also remains to be checked against its artwork.
+
+
+## Follow-up: guest invalidation of runtime image tables
+
+The independent runtime_image_updates homebrew isolates a same-frame coherency
+bug. It samples two dynamically indexed 2D textures, waits for GPU completion,
+then changes texture contents from the CPU and swaps descriptor entries between
+submissions. Each dispatch has an explicit cache invalidation. Before SubmitDone,
+the baseline returns the old values for all 128 samples in both update phases.
+The initial read, guard words and the control after SubmitDone pass.
+
+ACQUIRE_MEM texture/L1/scalar cache actions now invalidate the cached table
+snapshot and its per-image synchronization state on both graphics and compute
+queues. Guest invalidation no longer waits for the frame epoch to change. The
+fixed build passes all five cases with core and synchronization validation and
+zero reports. The four related probes pass their data checks; one mip_subrect
+run reports a separate WRITE_AFTER_PRESENT swapchain warning during presentation.
+That warning is retained in image-updates-regression-mip_subrect.log.
+
+The preceding unmodified warm-cache game run reaches IX, game over and the lobby
+without Vulkan or synchronization reports, and the transient purple reflection
+does not reproduce. This does not prove its cause. Live verification of the new
+invalidation fix is in progress. No physical PS4 execution is claimed.
+
+Evidence: out/ship-fix/image-updates-{baseline,fixed,fix-build}.log,
+image-updates-regression-*.log, warm-sync-gameplay.log and out/warm-sync-return.png.
