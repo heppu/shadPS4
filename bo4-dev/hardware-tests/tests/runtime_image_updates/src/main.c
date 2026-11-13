@@ -75,27 +75,35 @@ int main(void) {
     table.stride = sizeof(GnmTexture);
     table.numrecords = 2;
     GnmSampler sampler = {0};
-    StCase cases[7] = {{.name = "initial"},
+    StCase cases[10] = {{.name = "initial"},
+                       {.name = "cpu_update_one"},
                        {.name = "cpu_update"},
                        {.name = "descriptor_swap"},
                        {.name = "submit_boundary"},
                        {.name = "physical_alias"},
                        {.name = "remap_reuse"},
+                       {.name = "unrelated_remap"},
+                       {.name = "descriptor_remap"},
                        {.name = "guards"}};
-    for (unsigned phase = 0; phase < 6; ++phase) {
+    for (unsigned phase = 0; phase < 9; ++phase) {
         if (phase == 1) {
+            for (unsigned i = 0; i < sizes[0] / 4; ++i)
+                pixels[0][i] = .5f;
+            st_store_fence();
+        }
+        if (phase == 2) {
             for (unsigned t = 0; t < 2; ++t)
                 for (unsigned i = 0; i < sizes[t] / 4; ++i)
                     pixels[t][i] = t ? .75f : .5f;
             st_store_fence();
         }
-        if (phase == 2) {
+        if (phase == 3) {
             GnmTexture tmp = textures[0];
             textures[0] = textures[1];
             textures[1] = tmp;
             st_store_fence();
         }
-        if (phase == 4) {
+        if (phase == 5) {
             for (unsigned t = 0; t < 2; ++t) {
                 float* alias_pixels = (float*)((uint8_t*)alias +
                                                ((uint8_t*)pixels[t] - arena.base));
@@ -104,7 +112,7 @@ int main(void) {
             }
             st_store_fence();
         }
-        if (phase == 5) {
+        if (phase == 6) {
             for (unsigned t = 0; t < 2; ++t) {
                 off_t replacement;
                 void* address = pixels[t];
@@ -122,7 +130,29 @@ int main(void) {
             }
             st_store_fence();
         }
-        if (phase >= 3 && sceGnmSubmitDone() < 0)
+        if (phase == 7) {
+            off_t unrelated_physical;
+            void* unrelated = NULL;
+            if (!st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), 65536,
+                                  ST_DMEM_PAGE_BYTES, &unrelated_physical) ||
+                !st_dmem_map(&unrelated, 65536, unrelated_physical, false) ||
+                sceKernelMunmap(unrelated, 65536) != 0 ||
+                sceKernelReleaseDirectMemory(unrelated_physical, 65536) != 0)
+                return st_fail("reason=unrelated_remap");
+        }
+        if (phase == 8) {
+            GnmTexture replacement_descriptors[2] = {textures[1], textures[0]};
+            off_t replacement;
+            void* address = textures;
+            if (sceKernelMunmap(address, 65536) != 0 ||
+                !st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), 65536,
+                                  ST_DMEM_PAGE_BYTES, &replacement) ||
+                !st_dmem_map(&address, 65536, replacement, true))
+                return st_fail("reason=descriptor_remap");
+            memcpy(textures, replacement_descriptors, sizeof(replacement_descriptors));
+            st_store_fence();
+        }
+        if (phase >= 4 && phase < 7 && sceGnmSubmitDone() < 0)
             return st_fail("reason=submit_done");
         volatile uint32_t* output = st_arena_alloc(&arena, 144 * 4, 65536);
         st_fill_words(output, 144, 0xdeadbeef);
@@ -142,14 +172,16 @@ int main(void) {
             return st_fail("reason=submit");
         for (unsigned i = 0; i < 144; ++i) {
             uint32_t expected = 0xdeadbeef;
-            unsigned which = 6;
+            unsigned which = 9;
             if (i >= 8 && i < 136) {
                 unsigned group = (i - 8) / 64;
                 which = phase;
                 float value = phase == 0   ? (group ? .25f : .125f)
-                              : phase == 1 ? (group ? .75f : .5f)
-                              : phase == 4 ? (group ? .625f : .875f)
-                              : phase == 5 ? (group ? .3125f : .4375f)
+                              : phase == 1 ? (group ? .25f : .5f)
+                              : phase == 2 ? (group ? .75f : .5f)
+                              : phase == 5 ? (group ? .625f : .875f)
+                              : phase == 6 || phase == 7 ? (group ? .3125f : .4375f)
+                              : phase == 8 ? (group ? .4375f : .3125f)
                                            : (group ? .5f : .75f);
                 memcpy(&expected, &value, 4);
             }
@@ -157,6 +189,6 @@ int main(void) {
         }
     }
     sceGnmSubmitDone();
-    return st_finish_cases(cases, 7,
-                           "cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 remap_reuse=1 guards=1");
+    return st_finish_cases(cases, 10,
+                           "cpu_update_one=1 cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 remap_reuse=1 unrelated_remap=1 descriptor_remap=1 guards=1");
 }

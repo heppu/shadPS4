@@ -1394,3 +1394,38 @@ output words and guards passed; its run also reported WRITE_AFTER_PRESENT.
 A separate submit_draw_interval=32 experiment averaged 15.57 FPS and later
 ended in a GPUVM fault/device loss. Its timing setting was restored to zero.
 The fault has not been isolated to a specific code change.
+
+### Per-image update revisions and selective remap invalidation
+
+Immutable table entries now record the update revision of their backing image.
+Partial refreshes retain entries whose images have not changed; registration,
+image-state, descriptor, and frame changes still force a full refresh. CPU dirty
+state is published before the corresponding revision. Unmapping unrelated GPU
+buffers no longer invalidates all texture keys. Descriptor-table overlaps still
+force a reread, and texture overlaps invalidate cached keys.
+
+The runtime_image_updates homebrew now has ten cases, adding a CPU write to only
+one of two textures, an unrelated mapping retirement, and descriptor-table backing
+replacement at the same virtual address. All sixteen rendering probes passed
+with this change. The existing WRITE_AFTER_PRESENT diagnostic appeared in
+runtime_image_loads. A passing physical_alias case does not establish that the
+previously reproduced timing-dependent alias bug is fixed.
+
+The revisions-only opening run averaged 15.65 FPS. A moving run pinned to the
+9950X3D cache cores averaged 13.27 FPS but fell into water and was downed. Neither
+establishes playable combat. The flat-map experiment's 13.38 FPS measurement is
+invalid because a debugger attachment overlapped the final seconds; it was
+reverted. A 720p configuration experiment ran around 1.12 FPS and was reverted.
+Current internal resolution is 1920x1080, submission interval zero, and shader
+math settings are unchanged. Dark weapon silhouettes are visible intermittently
+in captures from both before and after incremental table refreshes.
+
+Frame-counter discovery now uses offline ELF symbol offsets plus /proc/PID/mem,
+avoiding debugger pauses during timed samples. CPU perf sampling remains enabled.
+Old automated movement routes can fall into water and are inadequate for judging
+sustained combat. Further optimization and representative gameplay checks remain.
+
+An offline replay of current-20261113.rdc completed within existing memory guards.
+The sum of per-event GPU durations was 26.42 ms, spread across thousands of draws
+and copies; no single expensive shader dominated. This older captured frame and
+instrumented replay are not a current native frame-time measurement.
