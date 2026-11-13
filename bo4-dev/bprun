@@ -1,0 +1,9 @@
+#!/bin/sh
+# usage: BPS="func@limit ..." bprun [seconds]   headless run under gdb, log guest callers of host functions
+cd "$(dirname "$0")"
+T=${1:-120}
+N=$(date +%m%d-%H%M%S); R=out/runs/$N; mkdir -p $R; ln -sfn runs/$N out/last
+docker rm -f shad-run >/dev/null 2>&1; while docker ps -a --format "{{.Names}}" | /bin/busybox grep -qx shad-run; do sleep 0.5; done
+SD_DOCKER_ARGS="--name shad-run -e BPS -e GBPS -e PATCH -e SDL_VIDEODRIVER -e RDOC_AT -e RDOC_SPAN -e SHAD_NO_REBASE -e SHAD_NO_CONTENT -e SHAD_NO_RELEASE -e SHAD_SYNC_GPU -e SHAD_FLIP_GPU_FIRST" ./sd /mnt/games/PS4/bo4-dev/headless sh -c "cd /out && (sleep $T; kill -KILL \$(pidof shadps4)) & gdb -batch -x /mnt/games/PS4/bo4-dev/gdbbp --args /src/build/shadps4 -g /mnt/games/PS4/CUSA11100/eboot.bin -f false; cp -r /home/dev/radv_dumps_* /out/ 2>/dev/null" > $R/stdout.txt 2>&1
+cp user/log/shad_log.txt $R/ 2>/dev/null
+echo $R; /bin/busybox grep -E "BPHIT|GBP |PATCHED" $R/stdout.txt | cut -c1-3000

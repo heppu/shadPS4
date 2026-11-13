@@ -1,0 +1,14 @@
+#!/bin/sh
+# Run a command inside the shadPS4 dev container. GPU is passed through, display is headless.
+HERE=$(cd "$(dirname "$0")" && pwd)
+SRC=$HOME/code/github.com/heppu/shadPS4
+GIDS=$(stat -c %g /dev/dri/* 2>/dev/null | sort -u | sed 's/^/--group-add /' | tr '\n' ' ')
+TTY=; [ -t 0 ] && TTY=-it
+mkdir -p "$HERE/user" "$HERE/ccache" "$HERE/out"
+exec docker run --rm $TTY --init \
+  --cap-add SYS_PTRACE --cap-add SYS_NICE --security-opt seccomp=unconfined \
+  --device /dev/dri $GIDS -e VRAM_MAX=${VRAM_MAX:-12000} -e GTT_MAX=${GTT_MAX:-4000} -e RAM_MIN=${RAM_MIN:-10000} --memory 28g --memory-swap 28g -e override_vram_size=${VRAM_MB:-10240} ${RADV_DEBUG:+-e RADV_DEBUG=$RADV_DEBUG} -e CCACHE_DIR=/ccache \
+  -v "$SRC":/src -v /mnt/games/PS4:/mnt/games/PS4 \
+  -v /home/heppu/.var/app/net.shadps4.shadPS4/data/shadPS4/addcont:/home/heppu/.var/app/net.shadps4.shadPS4/data/shadPS4/addcont:ro \
+  -v "$HERE/user":/home/dev/.local/share/shadPS4 -v "$HERE/ccache":/ccache -v "$HERE/out":/out \
+  ${SD_DOCKER_ARGS} shad-dev "$@"
