@@ -1,6 +1,6 @@
 # BO4 Zombies rendering validation — 2026-11-13
 
-Current checkpoint (f4b2ac4c): representative Tag der Toten and Voyage gameplay
+Current checkpoint (f4b2ac4c): representative Tag der Toten, Voyage and Ancient Evil gameplay
 now shows textured/lit materials, restored ship geometry, and continuous report
 hair. The Voyage GPU hang exposed by the scalar SCC fix is resolved by
 EXEC-aware first-lane selection. Voyage completes gameplay, report and return
@@ -987,3 +987,33 @@ skipped records. All 2,691 dumped SPIR-V modules pass spirv-val (older dumps are
 included). Evidence: readfirst-all-stages-audit.json and
 readfirst-shader-validation.json. The run uses a 6 GiB override and stays below
 the memory guard while RPCS3 remains running. Ancient Evil follow-up is pending.
+
+
+Ancient Evil follow-up on the same code: the initial Voyage-to-Ancient process
+reached Temple of Apollo but the guard terminated BO4 at 12,016 MiB combined
+VRAM usage (GTT 2,674 MiB, available RAM 31,291 MiB). That stop was not a shader
+hang. RPCS3 stayed running. The repeated, fresh BO4 process uses a 4 GiB driver
+VRAM override and completes gameplay, game over, report and return to lobby
+below the guard. Combined VRAM observed during gameplay is about 9.5–10 GiB;
+this override is an advertised budget, not a hard resident-memory cap.
+
+The 45-frame lightweight screenshot sequence preserves normal-lit frames before
+downed-state desaturation. Temple stone, painted columns, cloth, zombie skin and
+hair, metallic details, fire, green smoke and blue effects remain textured/lit.
+Movement, pistol fire, reload, equipment and damage/revival are exercised. The
+report records one kill, 590 points, 1m17s and round 1 (no completed round).
+The settled report and returned lobby both show correctly lit, detailed Scarlett
+clothing and continuous hair; the earlier post-Ancient black clothing does not
+recur. Gameplay samples are about 6–9 FPS, report/lobby about 15 FPS.
+
+The final run contains zero renderer errors and zero critical messages, with
+Vulkan game validation disabled and unrelated HLE stubs still present. Audit:
+1,152 current-generation records, zero invalid discoveries and skipped records.
+All 2,740 dumped SPIR-V modules validate, including older dumps. Evidence:
+readfirst-ancient-game.log, readfirst-ancient-guard.log,
+readfirst-ancient-{audit,spirv}.log, readfirst-ancient-sequence/0.png and 4.png.
+Saved screenshots: rendering-ancient-exec-fixed-20261113.png,
+rendering-ancient-report-exec-fixed-20261113.png and
+rendering-ancient-lobby-exec-fixed-20261113.png. This closes the specific observed
+post-Ancient clothing regression; higher-MRT SRC1 semantics, full-match coverage
+and the small player-card artwork comparison remain unverified.
