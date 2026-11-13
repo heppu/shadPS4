@@ -93,3 +93,15 @@ No physical PS4 execution is claimed.
 A later, longer gameplay run also exposed transient invalid image views during
 image-table descriptor updates (02996); those and dual-source attachment 09239
 remain under investigation. The repaired ship geometry remains visible.
+
+## Follow-up: descriptor binding order
+
+A cold startup core showed Vulkan validation 1.4.363 retaining a 15-binding push
+set while processing an 18-binding write. A standalone Vulkan reproducer isolates
+the transition: push set 0, replace it with an ordinary set, bind a higher set
+with another layout, then push set 0. The old order crashes in validation's
+DescriptorSet::PerformWriteUpdate (exit 139), without a preceding VUID.
+Binding set 0 before higher sets passes (exit 0, no VUID). This order also reaches
+the BO4 title screen past the captured startup failure. The emulator now binds
+sets in ascending order; this does not change guest shader semantics.
+Local diagnostic source/log: out/ship-fix/push-layout-repro.cpp and .log.
