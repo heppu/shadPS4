@@ -1140,3 +1140,25 @@ with at least 13,087 MiB available RAM. No threshold event occurs, and RPCS3
 remains running. guarded-alpha-game.log has zero renderer errors and critical
 messages with game Vulkan validation disabled; samples are preserved in
 guarded-alpha-memory.log.
+
+
+Blood of the Dead repeated with the 6 GiB driver override completes gameplay,
+a settled Richtofen report and return to lobby. A menu-input miss first launched
+an extra Alpha Omega run; that run is labeled alpha-repeat and excluded from
+Blood's coverage. Blood's tile and saved lobby selection were then inspected
+before starting a fresh process. The verified Blood run reports a 2,278 MiB
+usable GPU budget, rather than the earlier 487 MiB. A normal laboratory sample
+is about 9 FPS and preserves reflective metal vessels, glass, the blue
+blueprint, walls and weapon detail. The report and returned lobby retain
+textured/lit clothing, skin and continuous hair. Report: 2 kills, 500 points,
+round 1, 1m31s; no completed round is claimed.
+
+The 698 watchdog samples peak at 8,874 MiB combined VRAM and 2,039 MiB GTT,
+with at least 12,767 MiB available RAM. No threshold event occurs; RPCS3 remains
+running. This supersedes the earlier budget-limited Blood completion result,
+but does not establish long-session stability. guarded-blood-final-game.log
+contains zero renderer errors and critical messages with game Vulkan validation
+disabled. Evidence: guarded-blood-final-memory.log and
+rendering-blood-budget-fixed-20261113.png,
+rendering-blood-report-exec-fixed-20261113.png,
+rendering-blood-lobby-exec-fixed-20261113.png.
