@@ -68,3 +68,28 @@ with width 256 instead of 128; the fix passes all assertions. Vulkan validation
 reports no image/copy/view errors in that reproducer, but still reports 06409.
 No physical PS4 execution is claimed. Full local evidence is in
 `/mnt/games/PS4/bo4-dev/out/ship-fix/`.
+
+## Follow-up: overlay uploads and sparse arena limits
+
+`51038fd` maps and flushes complete ImGui upload allocations. The earlier code
+flushed VK_WHOLE_SIZE after mapping only the current vertex/index bytes, leaving
+the mapping end unaligned to nonCoherentAtomSize. The subsequent menu and
+Forecastle run contains no 01389 reports (`out/ship-fix/imgui-fixed-gameplay.log`).
+
+Sparse arenas now use the physical device's maxBufferSize and interval mappings.
+Requests crossing preferred allocation boundaries get a bounded contiguous host
+buffer without forcing two full arenas into an oversized allocation. Existing
+resident backing is rebound and BDA mappings refreshed; DMA synchronization and
+page-table updates split at arena boundaries. Released backing is detached from
+all retained arena aliases before it is freed.
+
+The OpenOrbis `sparse_arena_limits` workload checks narrow and spanning GPU writes,
+GPU readback, guards, and unmap/reuse across 2 GiB and 4 GiB virtual boundaries.
+It passes with zero VUID reports. `runtime_buffer_table` and `mip_subrect` also
+pass with zero VUID reports under the new allocator. The first live menu run
+likewise has no 06409 or 01389 reports. Live gameplay validation continues.
+No physical PS4 execution is claimed.
+
+A later, longer gameplay run also exposed transient invalid image views during
+image-table descriptor updates (02996); those and dual-source attachment 09239
+remain under investigation. The repaired ship geometry remains visible.
