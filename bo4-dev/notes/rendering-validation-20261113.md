@@ -742,3 +742,26 @@ an initial run with its default disabled fails as documented and is not a
 regression. Build: query-fix-build.log, BUILD_EXIT=0. Probe logs:
 query-baseline3.log, query-fixed.log, query-regression-*.log (use scalar-dma for
 the scalar probe). Post-query-fix game validation remains pending.
+
+
+### Runtime compact texture descriptors
+
+Original runtime_compact_images directly samples compact four-word (R128)
+descriptors as controls, then selects them through runtime tables. Packed
+16-byte and padded 32-byte records, poisoned unused words, in-place rewrites,
+and guards are covered. Preserved baseline b81714a5 passes controls but returns
+zero in runtime cases (512 mismatches); the fixed executable passes all eight.
+Core/synchronization validation reports zero VUID/SYNC errors.
+
+Table discovery now accepts compact descriptors, table entry counts/bounds use
+four words, high words are zeroed, and pitch is reconstructed from width as in
+the existing static compact-descriptor path. Compact/full table identities are
+separate and compact samples do not generate a spurious volume-table variant.
+Shader binary version is 26. Depth tables, runtime queries, mixed dimensions,
+image updates, and image identity all pass with zero VUID/SYNC reports.
+
+Build: r128-fix-build.log, BUILD_EXIT=0. Reliable paired evidence:
+r128-baseline-final.log and r128-fixed-final.log. Earlier exploratory compact
+probes contained stride/register mistakes and are not baseline evidence.
+Neighboring probes: r128-regression-*.log. Game checks with the combined query
+and compact-table fixes remain pending.

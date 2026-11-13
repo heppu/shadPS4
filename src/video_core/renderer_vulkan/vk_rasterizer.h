@@ -244,6 +244,7 @@ private:
         s32 current_set{-1};
         bool has_unresolved{};
         bool is_depth{};
+        bool is_r128{};
     };
     struct BoundImageTable {
         u32 table;
@@ -259,7 +260,7 @@ private:
     };
     std::unordered_map<u64, TableKey> table_keys;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
-    std::array<u32, 32> last_image_tables{};
+    std::array<u32, 64> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
