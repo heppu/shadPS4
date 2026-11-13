@@ -1441,3 +1441,29 @@ failure mechanism has not been isolated. Restore conservative remap invalidation
 and retain per-image update revisions. The new remap homebrew remains useful.
 The control gameplay route again entered water and ended shortly after one
 minute; subsequent comparisons will use IX rather than this route.
+
+### Cached view validation and flat texture-table maps
+
+A generation now records insertions, replacements and removals of resolved table
+views. The final table scan is skipped only when the applicable validated view
+generation and image lifetime generation remain unchanged. Resolving or removing
+views invalidates that shortcut. The three hot texture-table maps now use the
+existing Abseil flat hash map implementation; no references survive insertions
+or rehashes. Conservative remap invalidation remains enabled.
+
+All sixteen rendering probes pass. runtime_image_views now additionally replaces
+the backing allocation of two channel views at the same virtual address and
+repeats their unchanged-table read; all samples and guards pass. The known
+WRITE_AFTER_PRESENT diagnostic appeared in runtime_image_loads. Build evidence:
+viewvalid-build.log; probe summaries: viewvalid-regressions-summary.log and
+viewvalid-extra-summary.log under the live harness out/performance directory.
+
+The IX stationary firing sequence measured 19.52 FPS versus 9.92 for the saved
+revisions-only control. This is not a controlled identical-frame comparison:
+characters, zombie positions and downed timing differ. Both samples include
+combat and downed states; the optimized sample ends before Game Over. Rendering
+CPU averaged 57.8% versus 45.3%, GPU busy 51.7% versus 66.4%. CPU cycle profiles
+attribute 17.47% to BuildImageTableSet versus 29.21%, and GetImageTableSet inclusive
+28.71% versus 37.61%. These are sampled proportions, not exact frame-time savings.
+The result remains below the playable-performance goal. Further GPU profiling
+and moving combat validation are required.

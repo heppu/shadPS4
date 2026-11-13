@@ -277,6 +277,7 @@ private:
         u64 checked_generation{};
         u64 checked_update_generation{};
         u64 checked_state_generation{};
+        u64 validated_view_generation{};
         s32 current_set{-1};
         bool has_unresolved{};
         bool built_empty{};
@@ -290,16 +291,17 @@ private:
         u32 table;
         u32 slot;
     };
-    std::unordered_map<u64, TableImage> table_images;
-    std::unordered_map<u32, u64> table_image_owners;
+    absl::flat_hash_map<u64, TableImage> table_images;
+    absl::flat_hash_map<u32, u64> table_image_owners;
     struct TableKey {
         u64 key;
         u64 epoch;
         VAddr begin;
         VAddr end;
     };
-    std::unordered_map<u64, TableKey> table_keys;
+    absl::flat_hash_map<u64, TableKey> table_keys;
     u64 table_key_generation{};
+    u64 table_view_generation{};
     absl::flat_hash_map<u64, vk::ImageView> image_table_gpu_views;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
     std::array<u32, 128 * AmdGpu::NUM_NUMBER_FMTS> last_image_tables{};
