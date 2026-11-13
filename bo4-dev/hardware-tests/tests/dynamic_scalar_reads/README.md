@@ -19,3 +19,10 @@ validation and no reports. Runtime buffer-table regression also passes.
 
 This probe covers a pointer alias of an explicitly bound buffer. It does not
 establish correctness for arbitrary unbound pointers or cold page faults.
+
+For cache compatibility, enable `Vulkan.pipeline_cache_enabled` and preserve the
+isolated cache between runs. A cache created with DMA disabled must be rejected
+when DMA is enabled; the probe then passes. Repeating enabled must preload the
+compatible pipeline and still pass. Disabling again must reject that pipeline
+and reproduce the unsupported dynamic-read result. The setting changes are host
+validation controls, not alternative expected results for physical hardware.
