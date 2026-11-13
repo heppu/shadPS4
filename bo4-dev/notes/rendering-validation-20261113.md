@@ -532,3 +532,41 @@ SPIR-V validation with --target-env vulkan1.3 passes all 2,001 dumped modules in
 the diagnostic directory, including 32 newly dumped since this capture run
 started. This validates module structure, not complete rendering semantics.
 Detailed results: out/ship-fix/magenta-shader-validation.json.
+
+### Reduced-memory reproducer comparisons
+
+The capture-enabled process completed three Classified-to-lobby transitions
+without the bright magenta patch. All three followed an initial reference
+capture, so this does not yet isolate capture instrumentation from the act of
+capturing a frame. The final screenshot is out/magenta-crossmap-return.png;
+log: out/ship-fix/magenta-three-capture-transitions.log.
+
+A normal run with the advertised VRAM reduced from 10 GiB to 8 GiB (application
+budget approximately 3,492 MiB) reproduced the magenta patch after Classified.
+RPCS3 remained running on the shared GPU, as requested. Evidence:
+out/reduced-return-lobby.png and out/ship-fix/magenta-reduced-return.log.
+An earlier normal run with the larger budget hit the 12,000 MiB total-VRAM
+guard before reaching the menu. Reducing the budget permits this comparison;
+it does not fix the reflection.
+
+A same-budget run with direct-memory shader reads disabled reached Classified
+and returned to a lobby with an unusually bright red reflection instead of the
+magenta patch. This is not evidence of a correct workaround. The initial black
+map-entry frames were a delayed transition, not an established rendering defect.
+Evidence: out/no-dma-after-intro.png, out/no-dma-lobby-result.png and
+out/ship-fix/no-dma-return-final.log. Direct-memory reads were restored for the
+next capture-enabled comparison, which will not take an initial reference
+capture. No emulator source change has been made for this symptom.
+
+The normal live shader profile reports support_bda=true. Pipeline warmup already
+compares the entire Shader::Profile in addition to the DMA-setting metadata;
+a missing device-profile compatibility check is not supported by code inspection.
+A sampled runtime sampler table contained 85 records (1,360 bytes), all with
+border_color_type=0. Neither a giant sampler-table hash nor custom-border-color
+caching explains that sampled table.
+
+The reference RenderDoc capture contains two guest frame sequences. Its first
+partial frame replays with invalid-looking geometry and must not be treated as
+live visual evidence. The final presentation has coherent background colors and
+fire, with character ghosting; it is not a pixel-identical live oracle. Evidence:
+out/ship-fix/fresh-lobby-replay-present.png and fresh-lobby-scan.txt.
