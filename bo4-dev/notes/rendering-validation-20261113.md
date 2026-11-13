@@ -303,3 +303,24 @@ bright rectangular effect artifacts above the otherwise textured deck. It is
 not a valid enabled-DMA comparison. The cache-corrected live run is now pending.
 Evidence: out/ship-fix/dma-cache-{seed,toggle-baseline,seed-fixed,toggle-fixed,
 warm-fixed,reverse-fixed}.log and dma-voyage-first.png.
+
+
+## Follow-up: dependent depth image transitions
+
+The cold validation run exposes a depth-image WRITE-AFTER-WRITE hazard. The
+independent depth_sample_attachment homebrew reproduces it with sampled depth
+and active stencil testing on the same image. Pixel checks pass, but two dependent
+layout transitions in one barrier command lack the required ordering. The
+stencil-disabled control is clean. Runtime now flushes pending transitions for
+an image before queuing another transition for that image.
+
+The reproducer now passes both pixel cases with zero validation reports. The
+stencil storage alias, mip/subrectangle and mixed 2D/3D probes also pass with
+zero core/synchronization reports. Build/diff checks pass. Live verification
+of this final ordering change remains pending.
+
+The same cold run also reports WRITE-AFTER-PRESENT and the known higher-MRT
+SRC1 blend error. Presentation remains under investigation; no suppression or
+speculative synchronization workaround is applied. The installed validation
+layer reports API version 1.4.363. Evidence: out/ship-fix/depth-sample-*.log,
+depth-order-*-regression.log and dma-cold-validation-startup.log.
