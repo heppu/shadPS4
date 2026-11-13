@@ -1,0 +1,3 @@
+FROM shad-dev
+USER root
+RUN pacman -Sy --noconfirm --needed perf

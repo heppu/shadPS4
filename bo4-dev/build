@@ -1,0 +1,2 @@
+#!/bin/sh
+cd "$(dirname "$0")" && ./sd sh -c 'cmake --build /src/build 2>&1 | tail -${LINES_OUT:-25}'

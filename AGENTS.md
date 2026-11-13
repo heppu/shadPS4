@@ -19,6 +19,10 @@ create `i-didnt-check-my-work.md` in the repo root with the contents:
 ## Git workflow
 
 - Never merge main into local feature branches, always rebase.
+- Commit and push meaningful progress to the user's fork, `heppu/shadPS4`, before ending a work session. This is standing user authorization; do not ask again for routine commits and pushes.
+- Use `bo4-dev` as the single active development branch, containing both custom tooling under `bo4-dev/` and emulator fixes. Push it to `origin`; do not push to `upstream`.
+- Keep all custom tooling in the first project commit above the upstream base, followed by individual emulator fix commits. Preserve old tips as archive tags before reorganizing published history.
+- Label unfinished work as a checkpoint and record validation status and remaining work.
 
 ## General expectations
 
