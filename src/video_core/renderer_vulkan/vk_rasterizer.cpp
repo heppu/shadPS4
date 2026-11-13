@@ -1436,12 +1436,15 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         return {};
     }
 
+    VideoCore::TextureCache::ImageDesc desc{tsharp, *image_desc};
     TableImage entry{
         .used_tick = gc_tick,
         .synced_tick = gc_tick,
         .synced_generation = table_cache_generation,
         .resolved_address = tsharp.Address(),
-        .full_hash = image_desc ? TableImageFullHash(tsharp, image_desc->table_type) : 0,
+        .full_hash = TableImageFullHash(tsharp, image_desc->table_type),
+        .content_address = desc.info.guest_address,
+        .content_size = desc.info.guest_size,
         .verify_tick = gc_tick + 1,
         .verify_interval = 1,
     };
@@ -1450,14 +1453,26 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         tsharp.Address(), 1,
         [&](VideoCore::ImageId, VideoCore::Image& image) { aliases_target |= is_target(image); });
     if (!aliases_target) {
-        VideoCore::TextureCache::ImageDesc desc{tsharp, *image_desc};
         const auto image_id = texture_cache.FindImage(desc);
         auto& image = texture_cache.GetImage(image_id);
         if (!texture_cache.GetAssociatedDepth(image) && !desc.IsSubrectTexture(image.info) &&
             !is_target(image)) {
-            // A key that is new here means the content changed, possibly through another
-            // mapping of the same memory that write tracking does not see.
-            texture_cache.InvalidateImage(image_id);
+            bool content_changed = true;
+            if (const auto owner = table_image_owners.find(image_id.index);
+                owner != table_image_owners.end()) {
+                if (const auto other = table_images.find(owner->second);
+                    other != table_images.end()) {
+                    const auto& previous = other->second;
+                    content_changed = previous.image_uid != image.image_uid ||
+                                      previous.resolved_address != entry.resolved_address ||
+                                      previous.content_address != entry.content_address ||
+                                      previous.content_size != entry.content_size ||
+                                      entry.full_hash == 0 || previous.full_hash != entry.full_hash;
+                }
+            }
+            if (content_changed) {
+                texture_cache.InvalidateImage(image_id);
+            }
             texture_cache.UpdateImage(image_id);
             entry.view = *texture_cache.FindTexture(image_id, desc).image_view;
             entry.image_id = image_id;
@@ -1467,7 +1482,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             if (const auto [owner, is_new] = table_image_owners.try_emplace(image_id.index, key);
                 !is_new && owner->second != key) {
                 if (const auto other = table_images.find(owner->second);
-                    other != table_images.end() &&
+                    content_changed && other != table_images.end() &&
                     other->second.resolved_address == entry.resolved_address) {
                     table_images.erase(other);
                     ++table_steals;

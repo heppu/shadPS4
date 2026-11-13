@@ -75,13 +75,14 @@ int main(void) {
     table.stride = sizeof(GnmTexture);
     table.numrecords = 2;
     GnmSampler sampler = {0};
-    StCase cases[6] = {{.name = "initial"},
+    StCase cases[7] = {{.name = "initial"},
                        {.name = "cpu_update"},
                        {.name = "descriptor_swap"},
                        {.name = "submit_boundary"},
                        {.name = "physical_alias"},
+                       {.name = "remap_reuse"},
                        {.name = "guards"}};
-    for (unsigned phase = 0; phase < 5; ++phase) {
+    for (unsigned phase = 0; phase < 6; ++phase) {
         if (phase == 1) {
             for (unsigned t = 0; t < 2; ++t)
                 for (unsigned i = 0; i < sizes[t] / 4; ++i)
@@ -100,6 +101,24 @@ int main(void) {
                                                ((uint8_t*)pixels[t] - arena.base));
                 for (unsigned i = 0; i < sizes[t] / 4; ++i)
                     alias_pixels[i] = t ? .875f : .625f;
+            }
+            st_store_fence();
+        }
+        if (phase == 5) {
+            for (unsigned t = 0; t < 2; ++t) {
+                off_t replacement;
+                void* address = pixels[t];
+                if (sceKernelMunmap(address, sizes[t]) != 0 ||
+                    !st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), sizes[t],
+                                      ST_DMEM_PAGE_BYTES, &replacement) ||
+                    !st_dmem_map(&address, sizes[t], replacement, true))
+                    return st_fail("reason=remap_reuse");
+                float* old_pixels = (float*)((uint8_t*)alias +
+                                             ((uint8_t*)pixels[t] - arena.base));
+                for (unsigned i = 0; i < sizes[t] / 4; ++i) {
+                    pixels[t][i] = t ? .4375f : .3125f;
+                    old_pixels[i] = t ? .1875f : .0625f;
+                }
             }
             st_store_fence();
         }
@@ -123,13 +142,14 @@ int main(void) {
             return st_fail("reason=submit");
         for (unsigned i = 0; i < 144; ++i) {
             uint32_t expected = 0xdeadbeef;
-            unsigned which = 5;
+            unsigned which = 6;
             if (i >= 8 && i < 136) {
                 unsigned group = (i - 8) / 64;
                 which = phase;
                 float value = phase == 0   ? (group ? .25f : .125f)
                               : phase == 1 ? (group ? .75f : .5f)
                               : phase == 4 ? (group ? .625f : .875f)
+                              : phase == 5 ? (group ? .3125f : .4375f)
                                            : (group ? .5f : .75f);
                 memcpy(&expected, &value, 4);
             }
@@ -137,6 +157,6 @@ int main(void) {
         }
     }
     sceGnmSubmitDone();
-    return st_finish_cases(cases, 6,
-                           "cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 guards=1");
+    return st_finish_cases(cases, 7,
+                           "cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 remap_reuse=1 guards=1");
 }

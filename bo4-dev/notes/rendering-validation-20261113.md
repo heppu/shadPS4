@@ -1290,3 +1290,52 @@ The direct-backing build completed its first gameplay sample at 12.07 FPS, with
 materials, lighting, shadows and HUD in the sampled scene. This remains below
 playable performance; investigation continues. The executable and logs are saved
 under the `backing` label.
+
+A later expanded runtime_image_updates binary exposes a timing-dependent failure
+in the physical_alias phase on the preserved 2089a007 executable as well as on
+the sparse-backing-retention experiment. Both return 0x3f400000 instead of
+0x3f600000. Thus the earlier six-case passing run is not evidence of a complete
+physical-alias fix. The new remap_reuse phase passes: fresh physical memory at
+the original texture addresses wins over the still-mapped old aliases. The other
+13 selected rendering probes pass; three existing presentation synchronization
+warnings recur. Periodic texture verification remains an incomplete substitute
+for tracking writes through every physical alias.
+
+An experiment retaining recently unmapped sparse-buffer backing for up to eight
+frames, capped at 128 MiB of reclaimable ranges, measured 12.42 FPS versus 12.07
+FPS in the preceding run. Allocation and sparse-binding costs remained prominent,
+so this does not establish a useful gain. The code was removed and its patch saved
+locally as out/performance/retention-experiment.patch. Temporary table/hash counters
+are now being used to identify the remaining rebuild and identity-check costs.
+
+Bulk direct-backing reads now traverse physical mapping segments rather than
+falling back to a 64-byte sampling loop when a texture spans multiple VMAs. Full
+verification includes the entire byte range. All 14 probes passed with no VUID
+or synchronization reports in that run. Render-thread profiling reduced
+SampleDirectBacking from 10.86% to 4.92% of CPU samples, but the gameplay average
+was still only 10.33 FPS; the menu route needed manual recovery in this run, so
+this is not a controlled before/after result.
+
+Temporary counters exposed approximately 26,000 image-key ownership replacements
+and 10 GB of full texture hashing per 120 table epochs in settled gameplay.
+Representative replacements had identical nonzero content hashes, guest addresses
+and byte sizes. Different descriptors for views of one unchanged image repeatedly
+evicted each other, forcing up to three table-building passes and further uploads.
+
+The new original OpenOrbis runtime_image_views probe samples red and swizzled-green
+views of one allocation in the same dispatch, then changes pixels, swaps the
+views and crosses SubmitDone. The saved 2089a007 binary returns zero for all 64
+samples from the first view in each of the four phases. The proposed fix compares
+allocation identity, verified content range and nonzero full hash before forcing
+an image reload or replacing the previous content key. Distinct views of unchanged
+content coexist. All five probe cases now pass, as do the other 14 probes, with
+no core or synchronization reports in this run. Gameplay measurement is in
+progress. Temporary diagnostic counters are excluded from production source.
+
+The view-preservation build averaged 16.05 FPS over the first measured gameplay
+minute (57.2% render-thread CPU occupancy, 59.1% mean GPU busy). Representative
+settled intervals fell from roughly 26,000 replacements and 10 GB of full hashing
+to around 600 replacements and 0.8 GB per 120 epochs. Later sampled frames showed
+19 FPS with textured weapons, geometry, lighting, shadows and HUD. This is still
+below the playability target. The production build without diagnostic logging
+also passes all five runtime_image_views cases. Further optimization continues.
