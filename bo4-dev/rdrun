@@ -1,0 +1,5 @@
+#!/bin/sh
+# usage: rdrun <script.py> <capture.rdc>   run a RenderDoc python script headless, output in out/rd
+cd "$(dirname "$0")"
+mkdir -p out/rd
+SD_DOCKER_ARGS="--name shad-rd --network none -e RDC=$2 -e RD_OUT=/out/rd -e RD_SAVE -e RD_ARGS" ./sd sh -c "export XDG_DATA_HOME=/tmp/xdg; mkdir -p /tmp/xdg/qrenderdoc && echo '{\"rdocConfigData\":1,\"Analytics_TotalOptOut\":true,\"Analytics_ManualCheck\":false,\"CheckUpdate_AllowChecks\":false}' > /tmp/xdg/qrenderdoc/UI.config; QT_QPA_PLATFORM=offscreen timeout ${RD_TIMEOUT:-600} qrenderdoc --python $1 > /out/rd/qrenderdoc.log 2>&1; echo rc=\$?"

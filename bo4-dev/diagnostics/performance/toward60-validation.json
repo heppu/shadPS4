@@ -1,0 +1,19 @@
+{
+  "control": "shadps4-before-page-locks",
+  "candidate": "shadps4-region-cache",
+  "native_route": "sequence-open-arena",
+  "control_fps": 26.083306,
+  "candidate_fps": 28.24997,
+  "fps_comparison_valid_for_clean_combat": false,
+  "reason": "Control downed at 20, 30, 40 and 50 seconds; candidate downed at 20 seconds. Different scene and revive timing.",
+  "control_render_cpu_ms_per_frame": 22.236,
+  "candidate_render_cpu_ms_per_frame": 21.475,
+  "probe_count": 23,
+  "probes_passed": 23,
+  "memory_probe_seconds": {
+    "control": 1.3100925903418101,
+    "candidate": 1.3157541380108644
+  },
+  "memory_probe_conclusion": "No measurable speedup beyond startup and run-to-run variation in three repetitions.",
+  "remaining": "60 FPS not achieved. Shader/resource binding remains the dominant measured CPU cost."
+}

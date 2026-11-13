@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Build a training or profile-optimized emulator using the existing offline dependencies."""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+here = Path(__file__).resolve().parent
+if len(sys.argv) != 2 or sys.argv[1] not in ('generate', 'use'):
+    raise SystemExit('usage: pgo-build generate|use')
+stage = sys.argv[1]
+output = here / 'out/performance'
+output.mkdir(parents=True, exist_ok=True)
+for name in ('pgo-hook.cmake', 'pgo-checkpoint.cpp'):
+    source = here / 'diagnostics/performance' / name
+    target = output / name
+    if not target.exists() or source.read_bytes() != target.read_bytes():
+        shutil.copy2(source, target)
+if stage == 'use' and not (output / 'pgo.profdata').is_file():
+    raise SystemExit('Merge a valid gameplay checkpoint into out/performance/pgo.profdata first')
+jobs = int(os.environ.get('BO4_BUILD_JOBS', '8'))
+if not 1 <= jobs <= 16:
+    raise SystemExit('BO4_BUILD_JOBS must be between 1 and 16')
+env = dict(os.environ, SD_DOCKER_ARGS='--network none')
+
+def run(*args):
+    subprocess.run([str(here / 'sd'), *args], cwd=here, env=env, check=True)
+
+build = '/src/build-pgo-gen' if stage == 'generate' else '/src/build'
+if stage == 'generate':
+    run('python3', '-c', '''from pathlib import Path
+import os
+root=Path('/src')
+target=root/'build-pgo-gen/externals'
+target.mkdir(parents=True,exist_ok=True)
+for source in (root/'build/externals').glob('ffmpeg-*'):
+    if source.name == 'ffmpeg-core': continue
+    dest=target/source.name
+    if not dest.exists(): dest.symlink_to(os.path.relpath(source,dest.parent),target_is_directory=source.is_dir())
+''')
+run('cmake', '-S', '/src', '-B', build, '-G', 'Ninja',
+    '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '-DCMAKE_C_COMPILER=clang',
+    '-DCMAKE_CXX_COMPILER=clang++', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
+    '-DCMAKE_C_COMPILER_LAUNCHER=ccache',
+    '-DFETCHCONTENT_SOURCE_DIR_FMT=/src/build/_deps/fmt-src',
+    '-DFETCHCONTENT_FULLY_DISCONNECTED=ON',
+    '-DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=/out/performance/pgo-hook.cmake',
+    '-DSHAD_PGO_STAGE=' + stage.upper())
+run('cmake', '--build', build, '-j' + str(jobs))

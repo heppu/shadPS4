@@ -1,0 +1,53 @@
+# Runtime image updates
+
+Independent OpenOrbis homebrew with original GCN assembly. Samples two 2D textures
+through a runtime descriptor table across multiple submissions before SubmitDone.
+After the first completion label, CPU writes change both texture values; after
+the second, CPU swaps the descriptor entries. GPU cache invalidation accompanies
+each dispatch through the shared barrier helper. Each phase checks all 128 values
+and 16 guard words. A final phase repeats after SubmitDone. Physical PS4 execution
+is unavailable. On baseline db4f1bfa, initial reads, guards and the SubmitDone control pass,
+but both same-frame update phases fail all 128 output words. With ACQUIRE_MEM
+invalidation of runtime image-table snapshots and image synchronization state,
+all five cases pass with core and synchronization validation and zero reports.
+
+```sh
+make -C tests/runtime_image_updates
+python3 scripts/run-test.py runtime_image_updates --shadps4 /path/to/shadps4 --timeout 40
+```
+
+The ELF is `out/runtime_image_updates/runtime_image_updates.elf`. No video flip
+is needed. Both CPU writes and descriptor replacement occur only after the
+prior GPU completion label; cache invalidation precedes each new dispatch.
+
+The physical-alias phase maps the arena a second time before any draw, then
+writes both textures through that previously unused mapping. After SubmitDone,
+the unchanged descriptors still address the first mapping and must sample the
+new values (0.625 and 0.875). This checks CPU-backing verification without
+replacing the original same-frame CPU-update and descriptor-swap controls.
+
+The `remap_reuse` phase unmaps both sampled ranges, maps newly allocated direct
+memory at the same virtual addresses, and gives the new memory different pixels.
+It also overwrites the still-mapped old physical aliases with another pattern.
+Sampling must use the replacement memory, with no stale GPU backing or old-alias
+contents leaking across the mapping lifetime.
+
+The per-image revision follow-up inserts `cpu_update_one` before the original
+CPU update case. It overwrites only the first texture and checks that the second
+still contains its initial pixels. Both this case and the following two-texture
+update execute before SubmitDone, with the descriptor table unchanged.
+
+The remap-dependency follow-up adds an unrelated mapping retirement and then
+replaces the descriptor table's own mapping at the same virtual address. The
+replacement reverses the two descriptors while keeping the table buffer address
+and size unchanged. Both cases run without another SubmitDone; their outputs and
+guards are checked alongside the existing texture-data remap case.
+
+The alias-lifetime follow-up removes the initial alias after the first GPU read,
+then recreates it immediately before the physical-alias write phase. This checks
+transitions between one and multiple virtual mappings after a texture is already
+cached. The old early-alias ELF is retained separately in local validation output.
+
+Each texture is also remapped as separate 16 KiB direct-memory ranges with
+NoCoalesce before the first read. Aliasing classification must cover all of a
+texture's backing ranges; crossing a virtual-map boundary alone is not an alias.

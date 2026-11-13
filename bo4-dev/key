@@ -1,0 +1,3 @@
+#!/bin/sh
+# usage: key <wtype args>   e.g. key -k Return   (inject keyboard input into the headless session)
+exec docker exec -e XDG_RUNTIME_DIR=/tmp/rt -e WAYLAND_DISPLAY=wayland-1 shad-run wtype "$@"

@@ -1,0 +1,9 @@
+#!/bin/sh
+# usage: hang [seconds]   headless run under gdb, interrupt after N seconds, dump guest state and all threads
+cd "$(dirname "$0")"
+T=${1:-45}
+N=$(date +%m%d-%H%M%S); R=out/runs/$N; mkdir -p $R; ln -sfn runs/$N out/last
+docker rm -f shad-run >/dev/null 2>&1; while docker ps -a --format "{{.Names}}" | /bin/busybox grep -qx shad-run; do sleep 0.5; done
+SD_DOCKER_ARGS="--name shad-run" ./sd /mnt/games/PS4/bo4-dev/headless sh -c "cd /out && (sleep $T; kill -INT \$(pidof shadps4)) & gdb -batch -x /mnt/games/PS4/bo4-dev/gdbinit --args /src/build/shadps4 -g /mnt/games/PS4/CUSA11100/eboot.bin -f false" > $R/stdout.txt 2>&1
+cp user/log/shad_log.txt $R/ 2>/dev/null
+echo $R

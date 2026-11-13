@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run the windowed game with the temporary performance preset.
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec "$HERE/play-fast" "$@"

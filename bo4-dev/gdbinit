@@ -1,0 +1,13 @@
+set pagination off
+set confirm off
+set print thread-events off
+handle SIGSEGV SIGBUS SIGILL SIGUSR1 SIGUSR2 SIGPWR SIGXCPU nostop noprint pass
+handle SIGABRT SIGTRAP stop print
+source /mnt/games/PS4/bo4-dev/guest.py
+run
+echo \n==== STOPPED ====\n
+bt 12
+guestframe
+echo \n==== ALL THREADS ====\n
+thread apply all bt 25
+kill

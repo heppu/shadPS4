@@ -1,0 +1,6 @@
+#!/bin/sh
+# usage: step <shotname> <wait-seconds> [key ...]   press keys (150ms each), wait, screenshot
+cd "$(dirname "$0")"; NAME=$1; W=$2; shift 2
+for k in "$@"; do ./key -P $k -s 150 -p $k; sleep 0.7; done
+sleep $W; ./shot $NAME >/dev/null; /bin/busybox grep -c . out/last/stdout.txt >/dev/null
+docker exec shad-run sh -c 'tail -c 4000 /home/dev/.local/share/shadPS4/log/shad_log.txt' | /bin/busybox grep -E 'Critical|Unhandled|Assert' | head -3
