@@ -1232,3 +1232,61 @@ ready under hardware-tests/tests/mrt_src1_probe and in the local probe archive.
 The all-eight-map matrix establishes sampled opening/report rendering only,
 with low FPS, no completed round and no full-match stability certification.
 RPCS3 was kept running. BO4 and the final diagnostic containers have exited.
+
+## Performance investigation (2026-11-13, in progress)
+
+The user accepted the sampled rendering but reported roughly 8 FPS and requested
+playable performance. All performance runs retain the existing 1920x1080 game
+rendering, DMA, precise readbacks and linear-image readback settings. They use Tag
+der Toten with the same opening control script. The script can get downed and
+then reach a post-match report; only the first 60 seconds after HUD detection are
+measured. Character/enemy and streaming variation means these are diagnostic
+runs, not a controlled comparative benchmark or full-match certification.
+
+Host: Ryzen 9 9950X3D, Radeon RX 9070 XT, 96 GB RAM. RPCS3 was no longer present
+when this investigation checked the process list; the agent did not stop it.
+Other applications remain untouched. The existing memory guard remains enabled.
+The advertised VRAM budget is normally 6 GiB. A 10 GiB trial did not establish a
+useful improvement. Perf recording is isolated in a diagnostic container, and
+report generation now runs after the game stops to reduce memory contention.
+
+The original CPU profile spent approximately 73% of render-thread samples under
+BuildImageTableSet. Each variant traversed 16,384 descriptors, with roughly 5,000
+compatible 2D entries. Changes now cache compatible descriptors, descriptor keys
+and live image handles, avoid repeated mapping lookups and LRU touches, and reuse
+immutable descriptor sets while their dependencies remain unchanged. These
+changes are generic; no title or shader hashes select the behavior.
+
+Observed 60-second frame-counter averages (FPS): candidate caching 8.97; contiguous
+sampling 11.97; repeated handle-cache trial 9.45; larger VRAM budget 12.12; cached
+keys 11.37; dependency caching 11.80; narrower GPU invalidation 7.93. These runs do
+not demonstrate a reliable playable improvement. The latest profile still spent
+47.2% of render-thread CPU samples in BuildImageTableSet. A separate context-switch
+profile frequently found synchronous GPU readback underneath CPU texture
+fingerprinting. Context-switch sample counts are not percentages of elapsed time.
+
+The next change samples direct-memory CPU backing for texture fingerprints, using
+the existing sparse-memory copy helper. It avoids read faults that unnecessarily
+synchronize GPU-owned buffer pages. Mapping/readability checks remain in place;
+normal image and buffer coherence paths still handle GPU-written data. Build and
+all 14 selected rendering probes passed; gameplay performance is being measured.
+Three existing SYNC-HAZARD-WRITE-AFTER-PRESENT reports occurred in this probe run,
+with no VUID reports. This is not a clean synchronization-validation claim.
+
+The original OpenOrbis runtime_image_updates homebrew now also writes both test
+textures through a second virtual mapping of the same direct memory, leaving the
+descriptors pointed at the first mapping. The preserved starting executable fails
+this case (expected 0x3f600000, observed 0x3f400000); the current executable passes
+all six checks. There has been no real-console measurement.
+
+Performance evidence is local under bo4-dev/out/performance, including frame-counter
+JSON, perf recordings/reports, screenshots, preserved starting/intermediate
+executables and regression logs. The unfinished task is to remove the remaining
+bottlenecks, measure a repeatable improvement, and validate sustained gameplay and
+representative rendering before claiming playability.
+
+The direct-backing build completed its first gameplay sample at 12.07 FPS, with
+61.97% render-thread CPU occupancy. Screenshots retain textured geometry, weapon
+materials, lighting, shadows and HUD in the sampled scene. This remains below
+playable performance; investigation continues. The executable and logs are saved
+under the `backing` label.

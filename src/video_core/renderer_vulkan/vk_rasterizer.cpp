@@ -1249,7 +1249,8 @@ u64 Rasterizer::TableImageContentHash(const AmdGpu::Image& tsharp,
                                                      table_type == AmdGpu::ImageType::Color2DArray};
     const VideoCore::TextureCache::ImageDesc desc{tsharp, resource};
     std::array<u8, SampleSize * NumSamples> samples;
-    if (!memory->SampleDirect(desc.info.guest_address, desc.info.guest_size, samples, NumSamples)) {
+    if (!memory->SampleDirectBacking(desc.info.guest_address, desc.info.guest_size, samples,
+                                     NumSamples)) {
         return 0;
     }
     // Memory that is still blank says nothing about which texture this is.
@@ -1275,8 +1276,8 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
         return 0;
     }
     table_verify_data.resize(count * ChunkSize);
-    if (!memory->SampleDirect(desc.info.guest_address, desc.info.guest_size, table_verify_data,
-                              count)) {
+    if (!memory->SampleDirectBacking(desc.info.guest_address, desc.info.guest_size,
+                                     table_verify_data, count)) {
         return 0;
     }
     table_verify_bytes += table_verify_data.size();
