@@ -1123,3 +1123,20 @@ with at least 19,850 MiB available RAM. No threshold event occurs; RPCS3 remains
 running. guarded-deadnight-game.log has zero renderer errors and critical
 messages with game Vulkan validation disabled; samples are preserved in
 guarded-deadnight-memory.log.
+
+
+Alpha Omega completes Security Checkpoint gameplay and a settled Takeo report
+on the same renderer. Textured buildings, chain-link/barbed-wire fences,
+painted signs, ground detail, vegetation, fire, smoke and moving enemies remain
+visible across camera movement. The report retains detailed armor, leather,
+cloth, skin and continuous hair. HUD-triggered movement, turning, pistol fire,
+reload/equipment inputs and damage/revival are exercised. Report: 4 kills,
+500 points, round 1, 1m24s; no completed round is claimed. Gameplay samples are
+about 4 FPS, report 12 FPS. Screenshots: rendering-alpha-exec-fixed-20261113.png
+and rendering-alpha-report-exec-fixed-20261113.png.
+
+The 692 watchdog samples peak at 10,704 MiB combined VRAM and 2,453 MiB GTT,
+with at least 13,087 MiB available RAM. No threshold event occurs, and RPCS3
+remains running. guarded-alpha-game.log has zero renderer errors and critical
+messages with game Vulkan validation disabled; samples are preserved in
+guarded-alpha-memory.log.
