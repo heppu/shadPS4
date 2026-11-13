@@ -268,3 +268,20 @@ Normal title/menu performance is about 27–34 FPS; the sampled IX gameplay view
 are around 10–15 FPS, so no full-speed claim is made. The VRAM guard remains
 untriggered at about 10.1 GB. Local frames: out/normal-ix-*.png and
 out/ship-fix/live-frames/*.png. Additional map/effect validation continues.
+
+
+## Follow-up: small bound buffers used by dynamic scalar reads
+
+Remaining Phi-based SRT diagnostics led to the dynamic_scalar_reads homebrew.
+With DMA disabled, 64 scalar-loop sums are wrong while ordinary buffer reads and
+guards pass. With DMA enabled, the sums are zero for a 256-byte source. Increasing
+the source to 64 KiB makes the existing enabled path pass: streaming small buffers
+omits their guest-address mapping. Shaders that use DMA now obtain resident
+buffers for both ordinary and runtime-table bindings. The original small-source
+probe passes its first dispatch; runtime_buffer_table also passes. Both have
+zero core/synchronization validation reports. Build succeeds.
+
+This fixes bound-buffer aliases, not arbitrary unbound pointer residency. The
+live configuration previously disabled DMA; live validation with it enabled is
+pending. Evidence: out/ship-fix/dynamic-scalar-{disabled,enabled,resident-enabled,
+fixed,buffer-regression}.log. Original sources accompany the fix.
