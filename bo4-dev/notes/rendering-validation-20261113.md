@@ -410,3 +410,35 @@ and concurrent queue work) have not reproduced it. This remains unresolved;
 no suppression or speculative workaround is applied. Local diagnostic sources
 and logs remain under out/ship-fix/present-*. The idle and allocation controls
 are still being narrowed before their sources are finalized.
+
+
+## Follow-up: presentation false positive isolated
+
+The previous native sparse control used a binary semaphore. Changing only that
+semaphore to a timeline reproduces WRITE_AFTER_PRESENT without any guest/game
+code or even sparse resource bindings. `diagnostics/sparse-present` contains the
+original standalone reproduction, binary and ordinary-submit controls, and a
+deliberately invalid missing-acquire-wait control. On upstream validator
+37ec2baf (API 1.4.368), the timeline case logs 10 presentation errors (duplicate
+limit); both valid controls log zero; the negative control logs 16 core/sync
+errors. Each positive case presents 40 frames; the negative presents six.
+
+The cause is missing sync-validation tracking for `vkQueueBindSparse` signals.
+The first sparse timeline wait is treated as a future unsignaled value, so
+`QueueSubmitCommand::Execute` defers that and all following queue submissions.
+Presentation validation continues against stale access state. A traced original
+`presentation_compute` homebrew records the arena-memory semaphore unresolved
+at value 1, then 242 deferred submissions and 118 presentation hazards. Its
+144 output/guard words still pass. `presentation_idle` stays alive for two
+seconds without guest rendering and passes with zero Vulkan reports. Both
+homebrew sources are shared with this checkpoint.
+
+This identifies the observed presentation diagnostic as a validator tracking
+defect; it does not establish all GPU synchronization correctness. Sparse
+resource synchronization coverage remains limited by the validator. No emulator
+semaphore change, validation suppression, or speculative rendering workaround
+is included. The separate higher-MRT SRC1 blend mapping still needs resolution.
+
+Evidence: out/ship-fix/{sparse-present-matrix,present-compute-unresolved-trace,
+presentation-idle-final,present-system-final}.log. Native reproduction and
+primary-source links are in diagnostics/sparse-present/README.md.
