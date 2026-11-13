@@ -324,3 +324,19 @@ SRC1 blend error. Presentation remains under investigation; no suppression or
 speculative synchronization workaround is applied. The installed validation
 layer reports API version 1.4.363. Evidence: out/ship-fix/depth-sample-*.log,
 depth-order-*-regression.log and dma-cold-validation-startup.log.
+
+
+The c73ade90 visual run reaches Voyage's forecastle with textured deck boards,
+ice, hull/windows and reflective weapon metal. The bright rectangles seen in
+the earlier stale-cache comparison are absent in entry and subsequent live
+views. Turning and firing work (ammo 8 to 7); steam/smoke remains visible. The
+settled view reports about 7 FPS. Immediate resume samples briefly reported
+about 1 FPS, so these are not full-speed results. No causal claim is made that
+DMA alone fixed those transient rectangles; this run logs no new DMA shader
+compilations and cached/scene differences remain possible. The depth-ordering
+fix was built while this older process ran and is not included in these frames.
+
+Saved image: rendering-voyage-cache-fixes-20261113.png. Local evidence:
+out/dma-voyage-live{1,2,3}.png, dma-voyage-settled.png and
+out/ship-fix/dma-visual-voyage.log. Next: live validation of the depth ordering
+change and investigation of presentation/blend diagnostics.
