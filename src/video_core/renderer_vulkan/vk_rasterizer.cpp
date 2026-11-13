@@ -1596,8 +1596,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     if (!table.is_depth && !table.is_read) {
                         const auto* image = resolved.GetImage(texture_cache);
                         table.has_gpu_images |=
-                            !image || image->usage.storage || image->binding.needs_rebind ||
-                            True(image->flags & VideoCore::ImageFlagBits::GpuModified);
+                            !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
                     }
                 }
             }
@@ -1715,8 +1714,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
             it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
             it->checked_update_generation != update_generation || it->has_unresolved ||
             it->has_gpu_images || it->checked_state_generation != state_generation ||
-            !table_remapped_ranges.empty() ||
-            image_table_sets[it->current_set].generation != texture_cache.ImageGeneration();
+            !table_remapped_ranges.empty();
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
@@ -1790,9 +1788,7 @@ void Rasterizer::ValidateImageTableSets() {
                     return true;
                 }
                 const auto it = table_images.find(key);
-                return it != table_images.end() &&
-                       texture_cache.TryGetImage(it->second.image_id, it->second.image_uid) !=
-                           nullptr;
+                return it != table_images.end() && it->second.GetImage(texture_cache) != nullptr;
             };
             const bool is_alive =
                 std::ranges::all_of(image_table_sets[current_set].keys, is_key_alive);
