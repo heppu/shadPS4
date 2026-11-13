@@ -174,7 +174,13 @@ bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
     }
     image->GetBarriers(image_barriers, *image->backing, dst_layout, dst_access, dst_stage,
                        subres_range);
-    return image_barriers.size() != prev_num_barriers;
+    const bool changed = image_barriers.size() != prev_num_barriers;
+    if (changed && dst_layout != vk::ImageLayout::eShaderReadOnlyOptimal && image->usage.texture &&
+        !image->usage.storage && !image->usage.render_target && !image->usage.depth_target &&
+        False(image->flags & VideoCore::ImageFlagBits::GpuModified)) {
+        ++image_state_generation;
+    }
+    return changed;
 }
 
 void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
