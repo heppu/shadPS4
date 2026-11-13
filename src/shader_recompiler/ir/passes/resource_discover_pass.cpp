@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <limits>
 #include "common/assert.h"
+#include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
@@ -507,6 +508,51 @@ static void DiscoverSharpTable(const SharpReference& sharp, SharpTableReference&
     table.offset_dw = static_cast<u32>(base.offset);
 }
 
+void LowerRuntimeImageQuery(IR::Inst& inst, const SharpReference& sharp) {
+    IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
+    const auto field = [&](u32 word, u32 offset, u32 bits) {
+        return ir.BitFieldExtract(IR::U32{sharp.dwords[word]}, ir.Imm32(offset), ir.Imm32(bits));
+    };
+    const auto zero = ir.Imm32(0U);
+    const auto one = ir.Imm32(1U);
+    const auto type = field(3, 28, 4);
+    const auto is_type = [&](AmdGpu::ImageType value) {
+        return ir.IEqual(type, ir.Imm32(u32(value)));
+    };
+    const auto is_msaa = ir.LogicalOr(is_type(AmdGpu::ImageType::Color2DMsaa),
+                                      is_type(AmdGpu::ImageType::Color2DMsaaArray));
+    const auto is_1d =
+        ir.LogicalOr(is_type(AmdGpu::ImageType::Color1D), is_type(AmdGpu::ImageType::Color1DArray));
+    const auto is_volume = is_type(AmdGpu::ImageType::Color3D);
+    const IR::U32 base = field(3, 12, 4);
+    const IR::U32 level{ir.Select(is_msaa, zero, ir.IAdd(base, IR::U32{inst.Arg(1)}))};
+    const auto minify = [&](IR::U32 value) {
+        return ir.UMax(ir.ShiftRightLogical(ir.IAdd(value, one), ir.UMin(level, ir.Imm32(31U))),
+                       one);
+    };
+    const auto width = minify(field(2, 0, 14));
+    const auto height = minify(field(2, 14, 14));
+    const auto depth = minify(field(4, 0, 13));
+    const auto layers = ir.IAdd(ir.ISub(field(5, 13, 13), field(5, 0, 13)), one);
+    const auto array = inst.Flags<IR::TextureInstInfo>().is_array;
+    const auto array_type =
+        ir.LogicalOr(ir.LogicalOr(is_type(AmdGpu::ImageType::Color1DArray),
+                                  is_type(AmdGpu::ImageType::Color2DArray)),
+                     ir.LogicalOr(is_type(AmdGpu::ImageType::Cube),
+                                  is_type(AmdGpu::ImageType::Color2DMsaaArray)));
+    const IR::U32 slices = array ? IR::U32{ir.Select(array_type, layers, zero)} : zero;
+    const IR::U32 y{ir.Select(is_1d, slices, height)};
+    const IR::U32 z{ir.Select(is_volume, depth, ir.Select(is_1d, zero, slices))};
+    const IR::U32 mips =
+        inst.Arg(2).U1()
+            ? IR::U32{ir.Select(is_msaa, one, ir.IAdd(ir.ISub(field(3, 16, 4), base), one))}
+            : zero;
+    const auto valid = ir.INotEqual(IR::U32{sharp.dwords[1]}, zero);
+    inst.ReplaceUsesWith(ir.CompositeConstruct(ir.Select(valid, width, zero),
+                                               ir.Select(valid, y, zero), ir.Select(valid, z, zero),
+                                               ir.Select(valid, mips, zero)));
+}
+
 void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources,
                         const Profile& profile) {
     IR::Inst* image_handle = inst.Arg(0).Inst();
@@ -535,6 +581,15 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
 
     auto& image_table = resource.tables[0];
     const auto inst_info = inst.Flags<IR::TextureInstInfo>();
+    if (inst.GetOpcode() == IR::Opcode::ImageQueryDimensions && tsharp.num_dwords == 8 &&
+        tsharp.post_op == SharpFetchPostOp::None) {
+        DiscoverSharpTable(tsharp, image_table);
+        if (!image_table.index.IsEmpty()) {
+            LowerRuntimeImageQuery(inst, tsharp);
+            resources.pop_back();
+            return;
+        }
+    }
     if (profile.max_image_table_size != 0 && inst.GetOpcode() == IR::Opcode::ImageSampleRaw &&
         tsharp.post_op == SharpFetchPostOp::None && !inst_info.is_r128) {
         DiscoverSharpTable(tsharp, image_table);
