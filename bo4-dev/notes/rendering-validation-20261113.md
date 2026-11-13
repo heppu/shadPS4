@@ -442,3 +442,30 @@ is included. The separate higher-MRT SRC1 blend mapping still needs resolution.
 Evidence: out/ship-fix/{sparse-present-matrix,present-compute-unresolved-trace,
 presentation-idle-final,present-system-final}.log. Native reproduction and
 primary-source links are in diagnostics/sparse-present/README.md.
+
+
+## Follow-up: Blood of the Dead and startup artifact
+
+Blood of the Dead reaches Richtofen's Laboratory with detailed brickwork, pipes,
+equipment, weapon geometry/materials, lamp glow, smoke and sparks. Two laboratory
+angles render coherently; moving forward and firing changes ammunition 8 to 7
+and leaves a visible bullet impact on a metal door. The laboratory samples
+report about 13 FPS; a close-up door view reports 26 FPS. These limited scene
+samples are not a benchmark or full-map certification.
+
+Saved image: rendering-blood-first-use-20261113.png. Local evidence:
+out/blood-first-use-{first,side,forward}.png and
+out/ship-fix/blood-first-use-gameplay.log. The automatic entry detector missed
+this map's HUD position, so gameplay was paused manually. No frozen-frame or
+full-match claim is made.
+
+The same startup displayed a uniform green frame before the title scene became
+normal. This is a remaining visual defect, saved as
+rendering-startup-green-20261113.png. Its cause is not established; no claim is
+made that it was introduced by the first-use change. The Blood of the Dead
+intro itself rendered normally. A targeted startup capture is the next step.
+
+The installed validator (1.4.363) also reproduces the native sparse timeline
+false positive, with zero errors in its binary and ordinary-submit controls.
+Final presentation_compute shader values pass while its presentation diagnostic
+remains; presentation_idle passes with zero core/sync reports.
