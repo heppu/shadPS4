@@ -632,3 +632,79 @@ these views. Observed performance is 8–10 FPS on the shared GPU. This is short
 opening-area coverage, not a full round. Screenshot:
 rendering-dead-of-night-20261113.png; local log: out/ship-fix/raw-copy-dead-night.log.
 The Alpha Omega thumbnail remains the intentional mosaic documented above.
+
+
+Ancient Evil reaches Temple of Apollo. The first late observation caught the
+player downed and is unsuitable for normal-lighting assessment. A repeated run
+captured a 25-frame low-memory sequence; frames 15 and 18 show normal lighting
+before the downed effect: gold statue reflections, stone/cloth/skin detail,
+textured zombies, fire, green smoke, and the blue wall weapon effect. No obvious
+matte-grey fallback appears. Observed performance is 6–7 FPS; the unattended
+character subsequently downs. No completed round is claimed. Saved frames:
+rendering-ancient-evil-{temple,zombies}-20261113.png. Local evidence:
+out/ship-fix/ancient-evil-sequence and raw-copy-ancient-evil.log.
+The lobby also remained free of the bright reflection patch after Dead of the
+Night and the first Ancient Evil run (four inspected returns in this process).
+
+
+Tag der Toten opening coverage shows textured snow, ice, buildings, water, skin,
+and reflective weapon surfaces. A 30-frame screenshot sequence preserves the
+transition into the first round; performance ranges from about 8 FPS early to
+1–2 FPS later with capture instrumentation and shader dumping enabled. This is
+not a normal-run performance measurement or a full-round validation. Saved
+screenshot: rendering-tag-der-toten-20261113.png. Local files:
+out/ship-fix/tag-toten-sequence, raw-copy-tag-final.log, and
+tag-depth-baseline.rdc (2,814,317,292 bytes). The capture spans multiple submit
+boundaries; its first partial sequence must be checked before use.
+
+### Remaining dynamic shadow-table bindings
+
+Ancient Evil's cold shader compilation logs 204 renderer/recompiler Error lines,
+including unresolved SRT offsets and Phi instructions, plus unflattened-sharp
+warnings. The earlier zero-renderer-error observation applied only through the
+Classified checks. The scalar-loop homebrew can pass while logging an SRT error,
+so the diagnostic alone is not a sufficient failure oracle.
+
+An offline cache audit using the current executable's debug types identifies a
+concrete gap: fragment program 0x9831dde2 has invalid image fetches at bindings
+21/22 in all four cached permutations; 0xdbfe971f has invalid fetches at 22/23 in
+all seven cached permutations. Every dword offset is UNKNOWN_LOCATION. In each
+pair, both are depth-comparison textures, one array and one non-array. Their
+InfoPersistent uses_dma flag is false; these missing image descriptors are not
+covered by the ordinary scalar-read DMA fallback. Runtime table discovery
+explicitly excludes is_depth, and the host table path also excludes R16/R32 and
+GPU render/depth targets. These exclusions must be addressed together, including
+per-draw synchronization of GPU-written depth images and descriptor layouts.
+Evidence: out/ship-fix/ancient-cache-audit.json and audit-cache.py. An independent
+OpenOrbis runtime_depth_tables probe is being prepared; no shadow-table fix is
+claimed at this checkpoint.
+
+
+### Runtime depth-comparison table implementation
+
+The original runtime_depth_tables homebrew now uses direct user-data texture
+controls. All four controls pass on c1c681e0, while runtime table selection fails
+with 256 output mismatches. The earlier constant S_BUFFER control encountered
+an SRT-walker null-address fault and is not used as the baseline.
+
+Depth instructions now participate in runtime table discovery. Depth/color
+resources and table identities are distinct. R32_FLOAT and R16_UNORM depth
+entries resolve through the ordinary image cache without CPU-content
+invalidation, and are updated and transitioned for each draw. Identical views
+reuse their immutable descriptor set. Shader binary version is 24.
+
+The extended original probe passes four controls, four runtime cases including
+an in-place descriptor swap, and three successive GPU-written depth cases.
+The initial fixed run disables automatic linear-image readback. A separate run
+with core and synchronization validation enabled also passes with zero VUID or
+SYNC reports and zero renderer/recompiler Error lines. Seven adjacent probes
+(depth_sample_attachment, runtime_image_dimensions, runtime_image_updates,
+runtime_image_identity, image_raw_buffer_copy, subrect_format_alias, and
+stencil_storage_alias) pass with zero VUID/SYNC reports as well. The actual
+validation settings are confirmed in each emulator log; earlier exploratory
+runs used unrecognized validation aliases and are not validation evidence.
+
+Build: out/ship-fix/depth-table-fix-build2.log, BUILD_EXIT=0.
+Baseline: depth-direct-run.log. Fixed: depth-table-fixed.log.
+Validated suite: depth-validated-*.log. Post-fix game checks remain in progress;
+passing synthetic cases alone does not establish correct game shadow tables.
