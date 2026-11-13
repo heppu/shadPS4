@@ -1187,8 +1187,6 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
         !memory->IsValidGpuMapping(tsharp.Address(), 0)) {
         return 0;
     }
-    // Guests that defragment streamed textures move them between addresses all the time, so
-    // the content names the texture when it can be read.
     // Sampling memory for every entry on every frame is slow, so a descriptor keeps its key
     // for a while. Content that changes in place is caught by the periodic verification.
     static constexpr u64 KeyLifetime = 256;
@@ -1199,13 +1197,11 @@ u64 Rasterizer::TableImageKey(const AmdGpu::Image& tsharp, AmdGpu::ImageType tab
         it != table_keys.end() && epoch - it->second.epoch < KeyLifetime) {
         return it->second.key;
     }
-    AmdGpu::Image identity = tsharp;
     u64 seed = u64(table_type);
     if (const u64 content = TableImageContentHash(tsharp, table_type); content != 0) {
-        identity.base_address = 0;
         seed ^= content;
     }
-    const u64 key = XXH3_64bits_withSeed(&identity, sizeof(identity), seed) | 1;
+    const u64 key = XXH3_64bits_withSeed(&tsharp, sizeof(tsharp), seed) | 1;
     if (table_keys.size() >= MaxCachedKeys) {
         table_keys.clear();
     }
