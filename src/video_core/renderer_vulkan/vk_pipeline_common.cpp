@@ -63,28 +63,24 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const Shader::PushDat
     const auto stage_flags = IsCompute() ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
     cmdbuf.pushConstants(*pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
 
+    if (!set_writes.empty()) {
+        if (uses_push_descriptors) {
+            cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
+        } else {
+            const auto desc_set = desc_heap.Commit(*desc_layout);
+            for (auto& set_write : set_writes) {
+                set_write.dstSet = desc_set;
+            }
+            instance.GetDevice().updateDescriptorSets(set_writes, {});
+            cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 0, desc_set, {});
+        }
+    }
+
     if (!table_sets.empty()) {
         cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 1,
                                   static_cast<u32>(table_sets.size()), table_sets.data(), 0,
                                   nullptr);
     }
-
-    // Bind descriptor set.
-    if (set_writes.empty()) {
-        return;
-    }
-
-    if (uses_push_descriptors) {
-        cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
-        return;
-    }
-
-    const auto desc_set = desc_heap.Commit(*desc_layout);
-    for (auto& set_write : set_writes) {
-        set_write.dstSet = desc_set;
-    }
-    instance.GetDevice().updateDescriptorSets(set_writes, {});
-    cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 0, desc_set, {});
 }
 
 std::string Pipeline::GetDebugString() const {
