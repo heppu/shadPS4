@@ -232,3 +232,22 @@ invalidation fix is in progress. No physical PS4 execution is claimed.
 
 Evidence: out/ship-fix/image-updates-{baseline,fixed,fix-build}.log,
 image-updates-regression-*.log, warm-sync-gameplay.log and out/warm-sync-return.png.
+
+
+## Follow-up: independent allocations with equal texture contents
+
+The runtime_image_identity homebrew exposes a second cache bug: two allocations
+with identical nonuniform contents share a cached image because the content key
+clears the base address. Updating only one then changes the sampled result of
+the other. Baseline 011768cb passes initial values and guards but fails the CPU
+update, descriptor swap and SubmitDone phases with 64 wrong words each.
+
+Image keys now retain the descriptor's allocation address. The identity probe
+and all five related probes pass with core and synchronization validation and
+zero reports. Build and diff checks pass. The earlier isolated mip_subrect
+repeat also passes without the intermittent presentation warning; its initial
+warning remains documented above. Live game validation of allocation identity
+is pending. The data checks are emulator results, not physical-console results.
+
+Evidence: out/ship-fix/image-identity-baseline.log, image-identity-fixed-*.log
+and image-identity-fix-build.log.
