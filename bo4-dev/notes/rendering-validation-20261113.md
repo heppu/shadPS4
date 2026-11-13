@@ -1,6 +1,6 @@
 # BO4 Zombies rendering validation — 2026-11-13
 
-Status: FAIL. Voyage of Despair reaches Forecastle gameplay, but the ship has missing/transparent surfaces, dark polygon patches and sometimes overbright panels. The earlier material-buffer fix restores visible wood/blood, weapon and zombie textures; it does not establish artifact-free rendering. No all-map or full-match pass is claimed.
+Earlier checkpoint: FAIL. Voyage of Despair reaches Forecastle gameplay, but the ship has missing/transparent surfaces, dark polygon patches and sometimes overbright panels. The earlier material-buffer fix restores visible wood/blood, weapon and zombie textures; it does not establish artifact-free rendering. No all-map or full-match pass is claimed.
 
 ## Scope and evidence
 
@@ -37,3 +37,34 @@ Two full-scene RenderDoc capture attempts exceeded the existing GPU/host memory 
 ## Remaining work
 
 Investigate a corrupt world draw with a complete GPU capture, then implement a general fix with appropriate hardware evidence if guest semantics change. Repeat representative scene/material/effect and warm-cache checks after that fix. Full matches and other Zombies maps remain unvalidated.
+
+## Follow-up: mipmapped subrectangle fix
+
+The complete current-frame capture `out/ship-fix/current-20261113.rdc` identified
+an incorrect sampled-image extent in GPU visibility culling. The guest requested
+a 128×128 depth pyramid (pitch 512) over the same allocation as a cached 256×128
+image. The host returned width 256 to `image_get_resinfo`. Correcting just that
+width in a diagnostic RenderDoc shader replacement changed 765 visibility count
+words and restored the missing ship wall in both albedo and normal attachments.
+All 4,426 subsequent indirect commands matched an independent reconstruction
+from their input records, ruling out the indirect-command generator for this case.
+
+The production fix extends the existing cropped sampled-image backing to
+compatible mip chains. It checks guest mip offsets and physical row layouts,
+copies the requested extent of every mip, and distinguishes cached backings by
+mip count. It contains no game or shader identifiers. Storage views retain the
+existing full image backing.
+
+`rendering-mip-subrect-20261113.png` shows live Forecastle gameplay after the fix:
+ship walls, windows, rigging and deck machinery are present, with textured deck,
+zombie and weapon materials. This establishes the observed missing-geometry fix;
+it is not yet an all-map or full-match visual pass. Combat/viewpoint coverage and
+the three previously recorded Vulkan validation categories remain in progress.
+
+The independent OpenOrbis homebrew under `hardware-tests/tests/mip_subrect`
+queries four alias views and checks every requested mip's dimensions and texel,
+output guards, and refreshed contents after another GPU write. The old code fails
+with width 256 instead of 128; the fix passes all assertions. Vulkan validation
+reports no image/copy/view errors in that reproducer, but still reports 06409.
+No physical PS4 execution is claimed. Full local evidence is in
+`/mnt/games/PS4/bo4-dev/out/ship-fix/`.

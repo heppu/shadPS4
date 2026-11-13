@@ -334,8 +334,10 @@ VideoCore::ImageView& Runtime::FindSubrectView(VideoCore::Image& image,
 
     auto create_info = image.backing->image.image_ci;
     create_info.extent = vk::Extent3D{info.size.width, info.size.height, 1};
+    create_info.mipLevels = info.resources.levels;
     auto it = std::ranges::find_if(image.backing_images, [&](const auto& backing) {
         return backing.image.image_ci.extent == create_info.extent &&
+               backing.image.image_ci.mipLevels == create_info.mipLevels &&
                backing.num_samples == info.num_samples;
     });
     auto& crop =
@@ -349,13 +351,18 @@ VideoCore::ImageView& Runtime::FindSubrectView(VideoCore::Image& image,
                           vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eCopy);
         FlushBarriers();
 
-        const vk::ImageCopy copy{
-            .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-            .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-            .extent = create_info.extent,
-        };
+        SmallVector<vk::ImageCopy, 8> copies;
+        for (u32 mip = 0; mip < create_info.mipLevels; ++mip) {
+            copies.push_back({
+                .srcSubresource = {vk::ImageAspectFlagBits::eColor, mip, 0, 1},
+                .dstSubresource = {vk::ImageAspectFlagBits::eColor, mip, 0, 1},
+                .extent = {std::max(info.size.width >> mip, 1u),
+                           std::max(info.size.height >> mip, 1u), 1},
+            });
+        }
         scheduler.CommandBuffer().copyImage(image.GetImage(), vk::ImageLayout::eTransferSrcOptimal,
-                                            crop.image, vk::ImageLayout::eTransferDstOptimal, copy);
+                                            crop.image, vk::ImageLayout::eTransferDstOptimal,
+                                            copies);
 
         // A full-size view can already be bound in the same draw.
         if (image.binding.is_bound && source_state.layout != vk::ImageLayout::eUndefined) {
