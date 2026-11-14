@@ -1634,3 +1634,22 @@ retain late execution. No physical-console result is claimed. Build:
 early-depth-final-build.log; exact binary: shadps4-early-depth-final. Native
 performance and visual checks are pending, with the previous shader cache saved
 in cache-before-early-depth. The performance goal remains open.
+
+The early-depth opening sample completed at 18.87 FPS. Its 374 newly emitted
+fragment shaders used logical addressing, so this scene does not demonstrate
+an application of the DMA-only optimization. The automatic moving follow-up
+failed because X11 input ran as root; the harness now delegates input to dev.
+No moving result is claimed for early-depth-cold.
+
+### Cache texture overlap membership (checkpoint)
+
+FindImage now keeps 512 bounded address-and-size overlap lists. Both image
+registration and removal generations invalidate them. Selection still checks
+current GPU-valid state, formats, stencil associations, subrects and resource
+coverage on every lookup. A local copy preserves the overlap list while overlap
+resolution may register or remove images. No selected-image result is cached.
+
+Build region-build.log passes. All sixteen original rendering probes pass
+(region-summary.log), including CPU writes through physical aliases, texture and
+descriptor remapping, raw buffer copies and subrect aliases. Performance remains
+unmeasured for this checkpoint. Native moving-arena timing follows.
