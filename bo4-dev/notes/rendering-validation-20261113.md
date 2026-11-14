@@ -1780,3 +1780,30 @@ from 12.44% to 2.28% of rendering CPU samples; table building falls 23.97% to
 speedup. The endpoint shows textured arena geometry and a live player; the
 previously observed dark weapon silhouette is still present in shadow. Performance
 and exhaustive visual validation remain unfinished.
+
+
+### Smaller subgroups for wave-independent fragment shaders
+
+Shader information now persists whether a fragment observes lane/subgroup state,
+uses shared memory, shader clocks or guest writes. Only independent fragments
+request a supported 32-lane subgroup; all other stages and dependent fragments
+retain the existing 64-lane path. Shader metadata version advances to 19 so the
+eligibility result survives cache reloads. Device subgroup-size bounds and the
+fragment stage support bit are checked.
+
+Original fragment_wave_size homebrew verifies constant RGBA output and mbcnt lane
+identity without assuming a screen-to-lane mapping. Saved control and candidate
+pass. GDB inspects the actual graphics-pipeline create structures: two independent
+fragment pipelines request 32, the lane-sensitive one requests 64; output remains
+correct (wave32-stages.json). All 19 rendering probes pass with core/sync validation.
+
+Fresh-cache native moving run: 15.3167 FPS, CPU53.00%, GPU54.02%. Warm-cache fresh
+combat run: 18.7666 FPS, CPU57.35%, GPU48.84%; intervals17.7,17.3,20.7,16.8,19.9,20.2.
+The endpoint shows live combat, textured arena and lit weapon surfaces. This remains
+below the playable-performance target, and differing scenes limit causal comparison.
+Primary Vulkan reference: https://docs.vulkan.org/spec/latest/chapters/shaders.html
+
+Further CPU attribution: libc offset 0x185f2e (and adjacent hot offsets) is inside
+a vectorized byte-comparison loop, confirmed by disassembling the runtime libc.
+Perf's inlined vector-assign labels should not be interpreted as direct proof of
+allocation costs. Repeated raw descriptor comparisons remain significant.

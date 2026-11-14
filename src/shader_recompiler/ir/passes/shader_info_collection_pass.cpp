@@ -252,6 +252,19 @@ void CollectShaderInfoPass(IR::Program& program, const Profile& profile) {
         }
     }
 
+    info.requires_wave64 =
+        info.sw_stage != SwStage::Fragment || info.uses_subgroup_id || info.uses_lane_id ||
+        info.uses_shader_clock || info.uses_group_quad || info.uses_group_shuffle ||
+        info.uses_group_ballot || info.loads.GetAny(IR::Attribute::SubgroupLtMask) ||
+        info.has_storage_images || info.shared_guest_segment.used_types != IR::Type::Void ||
+        info.shared_scratch_segment.used_types != IR::Type::Void ||
+        std::ranges::any_of(info.buffers, [](const auto& buffer) { return buffer.is_written; });
+    for (const auto* block : program.post_order_blocks) {
+        for (const auto& inst : block->Instructions()) {
+            info.requires_wave64 |= inst.GetOpcode() == IR::Opcode::SubgroupBarrier;
+        }
+    }
+
     if (!EmulatorSettings.IsDirectMemoryAccessEnabled() || !profile.support_bda) {
         info.uses_dma = false;
         info.readconst_types = Info::ReadConstType::None;
