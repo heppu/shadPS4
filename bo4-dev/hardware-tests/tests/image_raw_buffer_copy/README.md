@@ -30,3 +30,9 @@ With raw-buffer image synchronization, every case passes on the AMD Vulkan host
 with zero core/synchronization validation reports. The six neighboring probes
 (subrect format aliases, stencil storage, sampled depth attachment, runtime image
 updates/identity, and dynamic scalar reads) also pass without validation reports.
+
+A final CPU rewrite and raw-buffer read is followed by another GPU image fill
+and raw read at the same address. Both tiled and linear variants check that an
+existing image which temporarily has no valid GPU data is not mistaken for an
+address with no registered image. Initial raw reads before the first image write
+also exercise creation of a new image at a previously buffer-only address.

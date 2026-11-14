@@ -150,8 +150,43 @@ int main(void) {
             }
             st_emit_marker("CHECK", "layout=%u offset=%u raw_bytes=64 guards=64", layout, offsets[offset_case]);
         }
+        const uint32_t cpu_value = 0x55667788u;
+        const uint32_t gpu_value = 0x88776655u;
+        st_fill_words(source, IMAGE_BYTES / 4, cpu_value);
+        GnmBuffer small_input = st_raw_buffer(source, 64);
+        GnmBuffer small_output = st_raw_buffer(output, 64);
+        small_input.stride = small_output.stride = 4;
+        small_input.numrecords = small_output.numrecords = 16;
+        for (unsigned phase = 0; phase < 2; ++phase) {
+            st_fill_words(output, OUTPUT_WORDS, poison);
+            StDcb dcb;
+            st_dcb_begin(&dcb, &queue);
+            if (phase) {
+                GnmBuffer value = {0};
+                ((uint32_t*)&value)[0] = gpu_value;
+                sceGnmDrawCmdSetCsShader(&dcb.cmd, &filler);
+                sceGnmDrawCmdSetTsharpUserData(&dcb.cmd, GNM_STAGE_CS, 0, &src);
+                sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 8, &value);
+                sceGnmDrawCmdDispatchDirect(&dcb.cmd, 1, 1, 1, 0);
+                st_dcb_barrier(&dcb, 0);
+            }
+            sceGnmDrawCmdSetCsShader(&dcb.cmd, &copier);
+            sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 0, &small_input);
+            sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 4, &small_output);
+            sceGnmDrawCmdDispatchDirect(&dcb.cmd, 1, 1, 1, 0);
+            st_dcb_barrier(&dcb, 0);
+            if (!submit_and_wait(&dcb))
+                return st_fail("reason=cpu_then_gpu_submit layout=%u phase=%u", layout, phase);
+            for (unsigned word = 0; word < OUTPUT_WORDS; ++word) {
+                const uint32_t want = word < 16 ? (phase ? gpu_value : cpu_value) : poison;
+                if (output[word] != want)
+                    return st_fail("cpu_then_gpu layout=%u phase=%u word=%u expected=%08x got=%08x",
+                                   layout, phase, word, want, output[word]);
+            }
+        }
+        st_emit_marker("CHECK", "layout=%u cpu_then_gpu=1 raw_bytes=64 guards=64", layout);
     }
-    st_emit_marker("PASS", "layouts=2 gpu_writes=2 raw_copy_bytes=65536 partial_offsets=3 guards=1");
+    st_emit_marker("PASS", "layouts=2 gpu_writes=2 raw_copy_bytes=65536 partial_offsets=3 cpu_then_gpu=1 guards=1");
     st_arena_destroy(&arena);
     return 0;
 }
