@@ -1875,3 +1875,23 @@ Endpoint is live gameplay with textured arena and weapon. IntervalList<Interval>
 Add CPU share is 4.41% (previous dynamic-list-repeat 6.13%); differing scenes and
 power modes limit comparison. GPU policy stayed auto through probe and native
 runs after the second restoration. Exact binary: shadps4-interval-union.
+
+
+### Rejected vertex wave32 experiment and retained subgroup guards
+
+The vertex experiment initially passed point probes but dropped letters in native
+HUD text. A new original quad-list probe reproduced 768 mismatched color words;
+the saved 64-lane baseline passed. Retaining 64 lanes for linked pre-raster stages
+fixed that probe and the HUD, but native performance fell to 15.1667 FPS under auto
+policy. The experiment is removed; vertex stages retain the existing 64-lane path.
+A forced negative control on the experimental build produced the expected 128
+mismatched words for the lane-sensitive point case. Diagnostic scripts for that
+experiment require its matching binary; they do not describe retained behavior.
+
+Retained fixes omit the forbidden Flat decoration on vertex SubgroupLtMask and
+conservatively exclude written images and GroupAny from fragment wave32 eligibility.
+Shader binary/meta versions become 32/20. All 21 original probes, including the
+three-case vertex_wave_size fixture, pass with core and synchronization validation
+and RADV_PERFTEST=nggc (subgroup-safe-summary.log). The preexisting presentation
+synchronization warning is separate. No physical-console verification is available.
+Exact retained binary: shadps4-subgroup-safe. Gameplay performance work continues.

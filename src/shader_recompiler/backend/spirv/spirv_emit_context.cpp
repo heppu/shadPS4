@@ -324,7 +324,9 @@ void EmitContext::DefineInputs() {
     if (info.loads.GetAny(IR::Attribute::SubgroupLtMask)) {
         subgroup_lt_mask =
             DefineVariable(U32[4], spv::BuiltIn::SubgroupLtMask, spv::StorageClass::Input);
-        Decorate(subgroup_lt_mask, spv::Decoration::Flat);
+        if (sw_stage != SwStage::Vertex) {
+            Decorate(subgroup_lt_mask, spv::Decoration::Flat);
+        }
     }
     switch (sw_stage) {
     case SwStage::Vertex: {
