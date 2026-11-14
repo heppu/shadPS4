@@ -1722,3 +1722,25 @@ NoCoalesce mappings. Saved control fails its physical-alias case; the corrected
 candidate and six early/late alias repeats pass (alias-spans-summary.log).
 Build alias-spans-build.log passes; native alias-spans-moving is in progress.
 Do not use the original alias-aware moving result as a performance improvement.
+
+
+### Split mappings native result and sampler snapshot fix
+
+The completed alias-spans-moving run averaged 14.5333 FPS over 60 seconds,
+render CPU 64.18%, GPU busy 42.16%. Screenshot alias-spans-moving-sample-end.png
+shows the live player and textured arena. This remains below playable performance.
+
+Sampler table hashing could fault on a page shared with a previously GPU-written
+neighbor after BindBuffers had already marked the upcoming draw's output dirty.
+The widened readback copied old output bytes and cleared tracking before that draw
+executed. BindResources now snapshots sampler tables for all stages before binding
+output buffers. Exact GPU-written byte ranges trigger readback; otherwise direct
+backing reads avoid protection faults caused solely by neighboring bytes. Sampler
+hashing and resolution use the same bounded snapshot.
+
+Original OpenOrbis sampler_shared_page checks neighboring writes, GPU and CPU
+sampler replacement, 384 sampled outputs and guards. Saved b069cb21 control fails
+all three sample phases with untouched deadbeef output. Candidate passes all four
+cases with Vulkan core/synchronization validation (sampler-snapshot-probe.log).
+All 16 existing rendering probes pass (sampler-snapshot-summary.log); build passes.
+No physical-console result or native FPS improvement is claimed for this fix yet.
