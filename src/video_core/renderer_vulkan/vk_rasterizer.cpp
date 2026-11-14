@@ -429,6 +429,14 @@ void Rasterizer::OnSubmit() {
     runtime.TickFrame();
 }
 
+void Rasterizer::OnWriteData(VAddr address, u64 size) {
+    if (memory->IsUniquelyMapped(address, size).value_or(false)) {
+        texture_cache.ProcessDownloadImages(address, size);
+    } else {
+        texture_cache.ProcessDownloadImages();
+    }
+}
+
 void Rasterizer::OnFence() {
     texture_cache.ProcessDownloadImages();
 }

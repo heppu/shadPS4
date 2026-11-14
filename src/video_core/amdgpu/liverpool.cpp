@@ -804,7 +804,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 u64* address = write_data->Address<u64*>();
                 if (!write_data->wr_one_addr.Value()) {
                     if (rasterizer) {
-                        rasterizer->OnFence();
+                        rasterizer->OnWriteData(write_data->Address<VAddr>(), data_size);
                     }
                     std::memcpy(address, write_data->data, data_size);
                 } else {
@@ -1203,7 +1203,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
             if (!write_data->wr_one_addr.Value()) {
                 if (rasterizer) {
-                    rasterizer->OnFence();
+                    rasterizer->OnWriteData(write_data->Address<VAddr>(), data_size);
                 }
                 std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
             } else {

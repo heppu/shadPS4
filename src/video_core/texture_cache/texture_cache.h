@@ -150,7 +150,7 @@ public:
     void UnmapMemory(VAddr cpu_addr, size_t size);
 
     /// Schedules a copy of pending images for download back to CPU memory.
-    void ProcessDownloadImages();
+    void ProcessDownloadImages(VAddr address = 0, u64 size = 0);
 
     /// Retrieves the image handle of the image with the provided attributes.
     [[nodiscard]] ImageId FindImage(ImageDesc& desc, bool exact_fmt = false);
