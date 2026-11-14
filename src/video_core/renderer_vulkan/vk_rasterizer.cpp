@@ -1810,8 +1810,9 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
                 refresh_all = true;
                 std::memcpy(it->shadow.data(), source, bytes);
-                it->entries_changed = true;
-                it->entries.clear();
+                image_table_entries.clear();
+                image_table_entries.reserve(it->entries.size());
+                auto previous = it->entries.begin();
                 for (u32 i = 0; i < it->num_entries; ++i) {
                     AmdGpu::Image tsharp{};
                     std::memcpy(&tsharp,
@@ -1826,11 +1827,22 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                     tsharp.min_lod_warn = 0;
                     tsharp.counter_bank_id = 0;
                     tsharp.lod_hw_cnt_en = 0;
-                    if (IsTableImageCompatible(tsharp, it->type, it->is_depth, it->is_read,
-                                               it->number_format)) {
-                        it->entries.push_back({i, tsharp});
+                    const bool had_entry = previous != it->entries.end() && previous->index == i;
+                    if (had_entry && std::memcmp(&previous->sharp, &tsharp, sizeof(tsharp)) == 0) {
+                        image_table_entries.push_back(*previous);
+                    } else {
+                        it->entries_changed |= had_entry;
+                        if (IsTableImageCompatible(tsharp, it->type, it->is_depth, it->is_read,
+                                                   it->number_format)) {
+                            image_table_entries.push_back({i, tsharp});
+                            it->entries_changed = true;
+                        }
+                    }
+                    if (had_entry) {
+                        ++previous;
                     }
                 }
+                it->entries.swap(image_table_entries);
             }
         } else {
             refresh_all |= !it->entries.empty();

@@ -308,6 +308,7 @@ private:
     std::array<u32, 128 * AmdGpu::NUM_NUMBER_FMTS> last_image_tables{};
     std::vector<ImageTableSet> image_table_sets;
     std::vector<ImageTable> image_tables;
+    std::vector<ImageTableEntry> image_table_entries;
     boost::container::small_vector<BoundImageTable, 2> bound_image_tables;
     std::vector<u64> image_table_keys;
     std::vector<vk::ImageView> image_table_views;
