@@ -1664,7 +1664,15 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 if (!refresh_all && !candidate.is_dynamic &&
                     candidate.update_version ==
                         texture_cache.ImageUpdateVersion(candidate.image_id)) {
-                    continue;
+                    const auto cached = table_images.find(candidate.key);
+                    if (cached != table_images.end() && cached->second.GetImage(texture_cache)) {
+                        auto& resolved = cached->second;
+                        if (resolved.used_tick != epoch) {
+                            resolved.used_tick = epoch;
+                            texture_cache.KeepAlive(resolved.image_id);
+                        }
+                        continue;
+                    }
                 }
                 candidate.is_dynamic = true;
                 const u32 i = candidate.index;
@@ -1707,7 +1715,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     candidate.update_version = resolved.synced_update_version;
                     candidate.is_dynamic =
                         !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind ||
-                        (!table.is_depth && !table.is_read && resolved.has_alias);
+                        (!table.is_depth && !table.is_read &&
+                         (resolved.has_alias || resolved.resolved_address != tsharp.Address()));
                     table.has_gpu_images |= candidate.is_dynamic;
                 } else {
                     clear_entry(i);
@@ -1837,12 +1846,13 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_alias_generation != alias_generation || is_switched) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
-        bool refresh_all = it->current_set < 0 || it->checked_tick != gc_tick ||
+        bool refresh_all = it->current_set < 0 ||
                            it->checked_alias_generation != alias_generation ||
                            !table_remapped_ranges.empty() ||
                            (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
                                                         texture_cache.ImageGeneration());
-        const bool refresh_changed = it->checked_update_generation != update_generation ||
+        const bool refresh_changed = it->checked_tick != gc_tick ||
+                                     it->checked_update_generation != update_generation ||
                                      it->checked_state_generation != state_generation ||
                                      it->has_unresolved || it->has_gpu_images;
         it->checked_tick = gc_tick;
@@ -1851,7 +1861,6 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             const auto* source = reinterpret_cast<const void*>(address);
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
-                refresh_all = true;
                 std::memcpy(it->shadow.data(), source, bytes);
                 image_table_entries.clear();
                 image_table_entries.reserve(it->entries.size());
@@ -1886,6 +1895,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                     }
                 }
                 it->entries.swap(image_table_entries);
+                refresh_all |= it->entries_changed;
             }
         } else {
             refresh_all |= !it->entries.empty();
