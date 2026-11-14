@@ -3,12 +3,16 @@
 
 #include "common/alignment.h"
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/host_shaders/array_download_comp.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/texture_cache/blit_helper.h"
+#include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/image.h"
+#include "video_core/texture_cache/image_view.h"
 
 #include <vulkan/vulkan_format_traits.hpp>
 
@@ -219,6 +223,9 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferImageCopy> download_copies) {
     SetBackingSamples(src, src->info.num_samples);
     scheduler.EndRendering();
+    if (DownloadImageArray(src, dst, download_copies)) {
+        return;
+    }
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -240,6 +247,131 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
         AccessBuffer(dst, copy.bufferOffset, copy_size, vk::PipelineStageFlagBits2::eCopy,
                      vk::AccessFlagBits2::eTransferWrite);
     }
+}
+
+void Runtime::CreateArrayDownloadPipeline() {
+    const auto device = instance.GetDevice();
+    const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
+        {0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute},
+        {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
+    }};
+    const vk::DescriptorSetLayoutCreateInfo desc_info{
+        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+        .bindingCount = bindings.size(),
+        .pBindings = bindings.data(),
+    };
+    auto [desc_result, desc_layout] = device.createDescriptorSetLayoutUnique(desc_info);
+    ASSERT(desc_result == vk::Result::eSuccess);
+    array_download_desc_layout = std::move(desc_layout);
+    const vk::PushConstantRange constants{vk::ShaderStageFlagBits::eCompute, 0, 8 * sizeof(u32)};
+    const vk::DescriptorSetLayout set_layout = *array_download_desc_layout;
+    const vk::PipelineLayoutCreateInfo layout_info{
+        .setLayoutCount = 1,
+        .pSetLayouts = &set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &constants,
+    };
+    auto [layout_result, layout] = device.createPipelineLayoutUnique(layout_info);
+    ASSERT(layout_result == vk::Result::eSuccess);
+    array_download_layout = std::move(layout);
+    const auto module = CompileSPV(ARRAY_DOWNLOAD_COMP, device);
+    const vk::ComputePipelineCreateInfo pipeline_info{
+        .stage = {.stage = vk::ShaderStageFlagBits::eCompute, .module = module, .pName = "main"},
+        .layout = *array_download_layout,
+    };
+    auto [result, pipeline] = device.createComputePipelineUnique(VK_NULL_HANDLE, pipeline_info);
+    ASSERT(result == vk::Result::eSuccess);
+    array_download_pipeline = std::move(pipeline);
+    device.destroyShaderModule(module);
+}
+
+bool Runtime::DownloadImageArray(VideoCore::Image* src, const VideoCore::Buffer* dst,
+                                 std::span<const vk::BufferImageCopy> copies) {
+    if (src->info.num_samples != 1 || src->info.props.is_block ||
+        src->aspect_mask != vk::ImageAspectFlagBits::eColor ||
+        ConvertImageType(src->info.type) != vk::ImageType::e2D ||
+        !VideoCore::IsVulkanFormatCompatible(src->info.pixel_format, vk::Format::eR32Uint) ||
+        !std::ranges::any_of(
+            copies, [](const auto& copy) { return copy.imageSubresource.layerCount >= 16; })) {
+        return false;
+    }
+    const u64 alignment = instance.StorageMinAlignment();
+    for (const auto& copy : copies) {
+        const u64 offset = Common::AlignDown(copy.bufferOffset, alignment);
+        const u64 row_length = copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
+        const u64 height =
+            copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
+        if (row_length * height * copy.imageSubresource.layerCount > 128_MB / sizeof(u32)) {
+            return false;
+        }
+        const u64 size = BufferImageCopySize(copy, src->info.pixel_format);
+        if (copy.bufferOffset % sizeof(u32) != 0 || size + copy.bufferOffset - offset > 128_MB ||
+            copy.imageSubresource.aspectMask != vk::ImageAspectFlagBits::eColor ||
+            copy.imageExtent.depth != 1 || copy.imageOffset.z != 0) {
+            return false;
+        }
+    }
+    if (!array_download_pipeline) {
+        CreateArrayDownloadPipeline();
+    }
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
+                vk::AccessFlagBits2::eShaderRead);
+    for (const auto& copy : copies) {
+        needs_flush |= IsBufferAccessed(dst, copy.bufferOffset,
+                                        BufferImageCopySize(copy, src->info.pixel_format), true);
+    }
+    if (needs_flush) {
+        FlushBarriers();
+    }
+    const auto cmdbuf = scheduler.CommandBuffer();
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *array_download_pipeline);
+    for (const auto& copy : copies) {
+        VideoCore::ImageViewInfo view_info;
+        view_info.type = AmdGpu::ImageType::Color2DArray;
+        view_info.format = vk::Format::eR32Uint;
+        view_info.range = {{static_cast<u16>(copy.imageSubresource.mipLevel),
+                            static_cast<u16>(copy.imageSubresource.baseArrayLayer)},
+                           {1, static_cast<u16>(copy.imageSubresource.layerCount)}};
+        view_info.is_storage = true;
+        const auto& view = src->FindView(view_info);
+        const vk::DescriptorImageInfo image_info{.imageView = *view.image_view,
+                                                 .imageLayout = vk::ImageLayout::eGeneral};
+        const u64 offset = Common::AlignDown(copy.bufferOffset, alignment);
+        const u64 size = BufferImageCopySize(copy, src->info.pixel_format);
+        const vk::DescriptorBufferInfo buffer_info{dst->Handle(), offset,
+                                                   size + copy.bufferOffset - offset};
+        const std::array<vk::WriteDescriptorSet, 2> writes{{
+            {.dstBinding = 0,
+             .descriptorCount = 1,
+             .descriptorType = vk::DescriptorType::eStorageImage,
+             .pImageInfo = &image_info},
+            {.dstBinding = 1,
+             .descriptorCount = 1,
+             .descriptorType = vk::DescriptorType::eStorageBuffer,
+             .pBufferInfo = &buffer_info},
+        }};
+        const u32 row_pitch = copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
+        const u32 height =
+            copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
+        const std::array<u32, 8> params{copy.imageExtent.width,
+                                        copy.imageExtent.height,
+                                        copy.imageSubresource.layerCount,
+                                        row_pitch,
+                                        row_pitch * height,
+                                        static_cast<u32>((copy.bufferOffset - offset) / 4),
+                                        static_cast<u32>(copy.imageOffset.x),
+                                        static_cast<u32>(copy.imageOffset.y)};
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *array_download_layout, 0,
+                                    writes);
+        cmdbuf.pushConstants(*array_download_layout, vk::ShaderStageFlagBits::eCompute, 0,
+                             sizeof(params), params.data());
+        cmdbuf.dispatch((copy.imageExtent.width + 7) / 8, (copy.imageExtent.height + 7) / 8,
+                        copy.imageSubresource.layerCount);
+        AccessBuffer(dst, copy.bufferOffset, size, vk::PipelineStageFlagBits2::eComputeShader,
+                     vk::AccessFlagBits2::eShaderWrite);
+    }
+    return true;
 }
 
 void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
