@@ -1570,3 +1570,22 @@ All sixteen rendering probes pass (lazy-table-summary.log), including repeated
 mixed CPU/GPU image reads, shared views, remaps and descriptor rewrites. Build:
 lazy-table-build.log; exact saved binary: shadps4-lazy-table. Native timing is in
 progress. This is a checkpoint, not a claim that the performance goal is met.
+
+The descriptor-copy candidate's opening IX run completed at 22.55 FPS.
+BuildImageTableSet's sampled rendering CPU share fell from 22.27% to 13.08%;
+GetImageTableSet fell from 34.14% to 26.78%. An additional 80-second moving arena
+run averaged only 17.37 FPS; the player remained alive with visible textured
+scenery. Thus the opening tunnel average overstates arena playability. A later
+80-second arena run restricted to CPUs 0–7,16–23 averaged 16.34 FPS. Enemy state,
+position and ammunition differed, so this is not an identical-scene A/B, but it
+provides no demonstrated benefit from forcing cache-core affinity. Default
+CPU placement remains the intended setting.
+
+The original runtime_image_loads probe now also uses 8,192 descriptors and two
+batches of 256 reads, swapping the two selected descriptors between batches.
+All 65,536 selected output words and the surrounding guards pass on the saved
+pre-copy-optimization executable, the current executable, and the current
+executable with submit_draw_interval=256 (large-table-summary.log). The existing
+WRITE_AFTER_PRESENT warning is still present in these runs; numerical PASS does
+not mean validation is completely clean. Native interval-256 timing is in
+progress, with the original interval-zero config backed up for restoration.
