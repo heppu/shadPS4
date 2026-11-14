@@ -2117,3 +2117,67 @@ performance improvement is material relative to the reported 8 FPS, but this
 is not evidence for a locked 30 FPS across all scenes or maps. The clean
 pgo-running minute and this longer mixed-state run are both retained, including
 all intermediate captures, rather than reporting only the favorable endpoint.
+
+
+## Further CPU optimization toward 60 FPS (2026-11-14)
+
+A fresh profile of the retained O2 PGO build found substantial mutex cost in the
+render thread. A 128-unlock debugger sample caught 126 calls from one bulk
+readback's PageManager watcher updates. This is a local operation sample, not a
+claim that 98% of all mutex calls have that origin. PageManager now uses one
+mutex per 64 4-KiB pages, retaining each page's individual read/write watcher
+counters and holding all acquired locks until coalesced protection calls finish.
+The original buffer_mapping_lifetimes homebrew now covers 48 lifetimes and 21
+distinct sizes (20 varied sizes plus the original 64-KiB size), adding 60/68 KiB and 252/260 KiB boundaries. Control and candidate
+pass every source, destination and guard check.
+
+The next mutex sample identified repeated texture-region scans for buffer-image
+selection and stencil association. These now share the existing FindImage region
+cache. Cache entries include address, size, registration and removal generations;
+live GPU validity, exact-size matching, format compatibility and depth linkage
+are still evaluated on each lookup. The candidate stores region membership, not
+a cached choice of a potentially stale image. Returned lists are copied so nested
+lookups cannot overwrite the caller's list.
+
+Both candidates build with native-CPU Clang O2 profile-use and pass all 23 original
+rendering probes with core/synchronization validation enabled. The existing
+presentation synchronization warning is not claimed fixed. The changed texture
+functions discard mismatching old PGO counters; the rest of the profile remains
+in use. No resolution, material, shader-quality or game-specific workaround was
+introduced. The downloadable original probe bundle includes the expanded ELF.
+
+Preliminary native runs are not valid clean-combat FPS comparisons.
+toward60-baseline measured 26.9333 FPS and 21.2376 render-CPU ms/frame;
+page-locks-running measured 30.4333 FPS and 19.8138 ms/frame. Both contain
+downed/revive periods. page-control-circle measured 27.3666 FPS and also went
+down. region-cache-continuous measured 38.4666 FPS while steering into the entry
+tunnel's walls and going down: explicitly exclude its average as normal arena
+performance. region-cache-look was a diagnostic restart with isolated look
+inputs and was stopped before its sample completed. It confirms that early
+turns trap the player in the spawn tunnel; camera input itself works. The revised
+sequence-open-arena route moves forward before turning. All raw timings, profiles
+and timed screenshots remain under the live harness's out/performance directory.
+
+
+Final same-script comparison: control-arena averages 26.0833 FPS and
+22.236 render-CPU ms/frame; region-cache-arena averages 28.2500 FPS and
+21.475 ms/frame. This is a provisional 8.3% FPS difference, not a proven clean
+combat improvement. Full capture review finds the control downed at 20, 30, 40
+and 50 seconds; the candidate is downed at 20 seconds, then alive with one revive
+remaining at 30/40/50/60. The initial commentary calling both final portions
+active play was corrected after inspecting the remaining control captures.
+The candidate's final 30-second active portion averages 30.5333 FPS. Captures show
+textured geometry, weapon, enemies, lighting and effects. No 60-FPS claim is made.
+The revised route is preserved as sequence-open-arena to retain the older
+sequence-arena diagnostic.
+
+A separate identical-workload check alternated the expanded memory probe three
+times per build, with all six runs passing. End-to-end means were
+1.3101 seconds for control and 1.3158 seconds for candidate;
+this does not demonstrate a microbenchmark speedup beyond startup/noise.
+The optimizations reduce page mutex count/storage and repeated region locking;
+shader and resource binding remain the dominant measured CPU work. Further
+work toward sustained 60 FPS is still needed. The optimized build is retained,
+and the owned benchmark containers are stopped with GPU policy restored to auto.
+Hindsight ingestion failed again with the external PostgreSQL shared-memory
+exhaustion error; this repository note is the durable record.

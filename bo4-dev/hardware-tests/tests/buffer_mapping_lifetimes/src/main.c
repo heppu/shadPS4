@@ -2,7 +2,7 @@
 #include "shadtest_guest.h"
 #include "copy.h"
 
-enum { ALIGNMENT = 65536, LIFETIMES = 44 };
+enum { ALIGNMENT = 65536, LIFETIMES = 48 };
 static bool submit_and_wait(StDcb* dcb) {
     const uint64_t address = (uint64_t)(uintptr_t)dcb->queue->label;
     const uint64_t value = ++dcb->queue->next_value;
@@ -42,8 +42,10 @@ int main(void) {
     uint64_t previous_size = 0;
     StCase cases[3] = {{.name = "copies"}, {.name = "sources"}, {.name = "guards"}};
     for (unsigned life = 0; life < LIFETIMES; ++life) {
+        const unsigned edge_sizes[] = {60 * 1024, 68 * 1024, 252 * 1024, 260 * 1024};
         const unsigned region_bytes = life < 12 ? ALIGNMENT
-            : (((life - 12) % 16) + 1) * 1024 * 1024;
+            : life < 16 ? edge_sizes[life - 12]
+            : (((life - 16) % 16) + 1) * 1024 * 1024;
         const unsigned words_per_region = region_bytes / 4;
         const uint64_t mapping_bytes = 4ull * region_bytes;
         off_t physical;
@@ -93,5 +95,5 @@ int main(void) {
     if (sceKernelMunmap(previous, previous_size) != 0 ||
         sceKernelReleaseDirectMemory(previous_physical, previous_size) != 0)
         return st_fail("reason=final_retirement");
-    return st_finish_cases(cases, 3, "lifetimes=44 varied_sizes=16 copies=1 source_preserved=1 guards=1");
+    return st_finish_cases(cases, 3, "lifetimes=48 varied_sizes=20 copies=1 source_preserved=1 guards=1");
 }
