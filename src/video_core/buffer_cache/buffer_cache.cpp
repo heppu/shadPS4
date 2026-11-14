@@ -176,6 +176,23 @@ void BufferCache::ReadHostMemory(VAddr device_addr, std::span<u8> dest) {
     }
 }
 
+bool BufferCache::UpdateHostMemory(VAddr device_addr, u32 size, std::vector<u8>& dest) {
+    if (size != 0 && gpu_modified_ranges.Intersects(device_addr, size)) {
+        ReadMemory(device_addr, size, false, false, true);
+    }
+    if (dest.size() == size) {
+        const auto matches = memory->CompareDirectBacking(device_addr, dest);
+        if (matches.value_or(false) ||
+            (!matches &&
+             std::memcmp(dest.data(), reinterpret_cast<const void*>(device_addr), size) == 0)) {
+            return false;
+        }
+    }
+    dest.resize(size);
+    ReadHostMemory(device_addr, dest);
+    return true;
+}
+
 void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async) {
     boost::container::small_vector<vk::BufferCopy, 1> copies;
     u64 total_size_bytes = 0;

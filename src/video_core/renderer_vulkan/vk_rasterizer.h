@@ -263,6 +263,17 @@ private:
         std::vector<vk::ImageView> views;
         std::vector<vk::ImageLayout> layouts;
     };
+    struct ImageTableSource {
+        VAddr address{};
+        u32 bytes{};
+        u64 bind{};
+        u64 revision{};
+        std::vector<u8> data;
+    };
+    void SnapshotImageTable(const Shader::ImageResource& image, const Shader::Info& stage);
+    std::vector<ImageTableSource> image_table_sources;
+    u64 image_table_bind{};
+
     struct ImageTableEntry {
         u32 index;
         AmdGpu::Image sharp;
@@ -280,7 +291,7 @@ private:
         u32 offset_dw{};
         u32 num_entries{};
         AmdGpu::ImageType type{};
-        std::vector<u8> shadow;
+        u64 source_revision{};
         std::vector<ImageTableEntry> entries;
         u64 checked_tick{};
         u64 checked_generation{};
@@ -297,6 +308,14 @@ private:
         bool is_r128{};
         bool is_read{};
         AmdGpu::NumberFormat number_format{AmdGpu::NumberFormat::Float};
+
+        bool Matches(VAddr addr, u32 size, const Shader::ImageResource& desc) const {
+            return address == addr && bytes == size && stride_dw == desc.table_stride_dw &&
+                   offset_dw == desc.table_offset_dw && num_entries == desc.table_size &&
+                   type == desc.table_type && is_depth == desc.is_depth &&
+                   is_r128 == desc.is_r128 && is_read == desc.table_is_read &&
+                   number_format == desc.table_number_format;
+        }
     };
     struct BoundImageTable {
         u32 table;
