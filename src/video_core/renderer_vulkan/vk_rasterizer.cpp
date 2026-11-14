@@ -1376,6 +1376,13 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         }
         const VAddr address = tsharp.Address();
         auto* image = entry.GetImage(texture_cache);
+        const u64 alias_generation = memory->DirectAliasGeneration();
+        const bool aliases_changed = entry.alias_generation != alias_generation;
+        if (aliases_changed) {
+            const auto unique = memory->IsUniquelyMapped(entry.content_address, entry.content_size);
+            entry.has_alias = !unique.value_or(false);
+            entry.alias_generation = unique ? alias_generation : 0;
+        }
         // Guests that alias direct memory can fill a texture through another mapping, which
         // neither write tracking nor the sampled key is sure to notice. Compare the whole
         // content now and then, often while the texture is new.
@@ -1385,13 +1392,21 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             table_verify_tick = gc_tick;
             table_verify_bytes = 0;
         }
-        if (image && image_desc && gc_tick >= entry.verify_tick &&
-            table_verify_bytes < MaxVerifyBytesPerTick) {
+        const bool verify_alias =
+            entry.has_alias && (aliases_changed || gc_tick >= entry.verify_tick ||
+                                entry.verified_generation != table_cache_generation);
+        if (image && image_desc &&
+            (verify_alias ||
+             (gc_tick >= entry.verify_tick && table_verify_bytes < MaxVerifyBytesPerTick))) {
             const u64 full_hash = TableImageFullHash(tsharp, image_desc->table_type);
             const bool is_changed = full_hash != 0 && full_hash != entry.full_hash;
-            entry.verify_interval =
-                is_changed ? 1 : std::min(entry.verify_interval * 2, MaxVerifyInterval);
-            entry.verify_tick = gc_tick + entry.verify_interval;
+            entry.verify_interval = is_changed || entry.has_alias || full_hash == 0
+                                        ? 1
+                                        : std::min(entry.verify_interval * 2, MaxVerifyInterval);
+            entry.verify_tick = full_hash == 0 ? gc_tick : gc_tick + entry.verify_interval;
+            if (full_hash != 0) {
+                entry.verified_generation = table_cache_generation;
+            }
             if (is_changed && image_desc) {
                 // The key was cached for this descriptor and no longer names what is in memory.
                 // Look the content up again instead of touching an image other entries share.
@@ -1445,6 +1460,8 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
     }
 
     VideoCore::TextureCache::ImageDesc desc{tsharp, *image_desc};
+    const u64 alias_generation = memory->DirectAliasGeneration();
+    const auto unique = memory->IsUniquelyMapped(desc.info.guest_address, desc.info.guest_size);
     TableImage entry{
         .used_tick = gc_tick,
         .synced_tick = gc_tick,
@@ -1455,6 +1472,9 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         .content_size = desc.info.guest_size,
         .verify_tick = gc_tick + 1,
         .verify_interval = 1,
+        .verified_generation = table_cache_generation,
+        .alias_generation = unique ? alias_generation : 0,
+        .has_alias = !unique.value_or(false),
     };
     bool aliases_target = false;
     texture_cache.ForEachImageInRegion(
@@ -1666,7 +1686,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     candidate.image_id = resolved.image_id;
                     candidate.update_version = resolved.synced_update_version;
                     candidate.is_dynamic =
-                        !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
+                        !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind ||
+                        (!table.is_depth && !table.is_read && resolved.has_alias);
                     table.has_gpu_images |= candidate.is_dynamic;
                 } else {
                     clear_entry(i);
@@ -1785,26 +1806,28 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     const u32 table_index = static_cast<u32>(std::distance(image_tables.begin(), it));
 
     const u64 gc_tick = TableEpoch();
+    const u64 alias_generation = memory->DirectAliasGeneration();
     // Guests alternate between copies of a table, coming back to one means it was rewritten.
     auto& last_table = last_image_tables[static_cast<size_t>(it->type) + (it->is_depth ? 16 : 0) +
                                          (it->is_r128 ? 32 : 0) + (it->is_read ? 64 : 0) +
                                          128 * static_cast<size_t>(it->number_format)];
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
     if (it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
-        it->checked_generation != table_cache_generation || is_switched) {
+        it->checked_generation != table_cache_generation ||
+        it->checked_alias_generation != alias_generation || is_switched) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
-        bool refresh_all =
-            it->current_set < 0 || it->checked_tick != gc_tick ||
-            (!it->is_depth && !it->is_read && it->checked_state_generation != state_generation) ||
-            !table_remapped_ranges.empty() ||
-            (it->current_set >= 0 &&
-             image_table_sets[it->current_set].generation != texture_cache.ImageGeneration());
+        bool refresh_all = it->current_set < 0 || it->checked_tick != gc_tick ||
+                           it->checked_alias_generation != alias_generation ||
+                           !table_remapped_ranges.empty() ||
+                           (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
+                                                        texture_cache.ImageGeneration());
         const bool refresh_changed = it->checked_update_generation != update_generation ||
                                      it->checked_state_generation != state_generation ||
                                      it->has_unresolved || it->has_gpu_images;
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
+        it->checked_alias_generation = alias_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
             const auto* source = reinterpret_cast<const void*>(address);
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
