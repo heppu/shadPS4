@@ -2181,3 +2181,70 @@ work toward sustained 60 FPS is still needed. The optimized build is retained,
 and the owned benchmark containers are stopped with GPU policy restored to auto.
 Hindsight ingestion failed again with the external PostgreSQL shared-memory
 exhaustion error; this repository note is the durable record.
+
+
+## Synchronization approach (2026-11-14)
+
+Instrumentation of scheduler finishes, submissions, GPU waits and readbacks
+identified repeated synchronization as a separate bottleneck. In representative
+five-second windows, GPU waits occupied about 2.2–2.4 seconds and synchronous
+buffer downloads about 2.3–2.5 seconds. These nested counters overlap and must
+not be added. The instrumentation was removed from the playable build.
+
+Batching concurrent CPU readback requests passed 24 probes but did not improve
+the same running route: 30.7166 FPS versus 30.7000 FPS control, both about
+19.79 render-CPU milliseconds per frame. The patch is preserved as a rejected
+diagnostic, not applied to the core.
+
+Retained changes: WAIT_REG_MEM reads the actual four-byte synchronization word
+through the buffer cache, avoiding unrelated page-wide readbacks while still
+synchronizing GPU-modified target bytes. WRITE_DATA drains only overlapping
+pending images when the destination is uniquely mapped. Aliased or uncertain
+mappings retain the full drain. EOS/EOP completion remained synchronous in this
+validated candidate. The original 512-round polling homebrew passed three
+alternating pairs, averaging 597160 us control versus 546884 us candidate
+(about 8.4% less workload time, not gameplay FPS). The candidate passes all 25
+normal-address rendering/coherence probes with Vulkan validation enabled.
+The pre-existing WRITE-AFTER-PRESENT warning remains.
+
+The expanded image_raw_buffer_copy checks a partial WRITE_DATA overwrite,
+untouched image words, another pending image, and output guards. A separate
+physical-alias version fails on the unchanged control: expected 0x10293847,
+observed 0xabcdef11. Its source is saved as image-write-alias-main.c; it is not
+included in the passing normal-address suite or claimed fixed.
+
+To keep comparison runs alive, a separate custom-health workload uses +3 bars
+(350 health), Short regeneration delay and Short regeneration speed, with
+unchanged enemy rules. It is not default gameplay. Control-health measured
+20.19998 FPS and 20.3795 render-CPU ms/frame; selective-health measured
+22.65000 FPS and 21.7660 ms/frame. This is a provisional 12.1% FPS difference;
+scene, character and enemy variation remain. Reviewed 10/30/60-second captures
+show both alive with textured geometry, characters, weapons and lighting.
+Precise-poll-running (29.14997 FPS) includes a downed period and cannot be used
+as a matched healthy-gameplay comparison. Sync-baseline had a debugger attached
+and cannot be used as native timing evidence. All raw data are retained in the
+live harness out/performance directory.
+
+
+An asynchronous EOP prototype queued image downloads and delayed the guest
+fence signal until their scheduler tick completed, allowing subsequent commands
+to be recorded. It passed the same 25 probes plus the new original
+`eop_image_ordering` probe (EOP / WAIT_REG_MEM / EOP with repeated command-buffer
+reuse). A native attempt lost its measurement because the sampler lacked
+container permissions. The corrected run `deferred-health2` averaged 22.01664
+FPS but was downed at 30 seconds despite verified 350-health settings. It is not
+a valid healthy comparison and establishes no speedup. The prototype is removed
+from the core, with patch and executable retained separately. Menu navigation
+needed manual correction and a 0.25-second tap duration; it is not evidence of
+a confirmed rendering regression. No 60-FPS or exhaustive visual-correctness
+claim follows from these runs. The retained core is the two simpler changes
+above; further work requires a repeatable surviving native workload and fresh
+CPU/GPU profiles rather than accepting unproven synchronization changes.
+
+All six timed captures for the control-health and selective-health workloads
+were reviewed: both stay alive at 350 health. All six control/batched default
+running captures stay alive at 200 health. Visual spot checks show textured
+materials and geometry; no matte-grey workaround is introduced. They do not
+prove every shader or scene correct. The original probe bundle now contains 34
+ELFs, including the three new synchronization probes and the expanded image
+probe; SHA256 0a5eaf23c4990adf71294fe5569bf5d9a70855a5e0bc2b257f2441d719704de6.

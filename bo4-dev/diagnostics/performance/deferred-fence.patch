@@ -1,0 +1,167 @@
+diff --git a/src/video_core/amdgpu/liverpool.cpp b/src/video_core/amdgpu/liverpool.cpp
+index 6719ff81..cdbc221b 100644
+--- a/src/video_core/amdgpu/liverpool.cpp
++++ b/src/video_core/amdgpu/liverpool.cpp
+@@ -108,6 +108,9 @@ void Liverpool::ProcessCeQueue() {
+ }
+ 
+ bool Liverpool::TestWaitRegMem(const PM4CmdWaitRegMem& wait) const {
++    if (rasterizer) {
++        rasterizer->PollPendingFences();
++    }
+     const u32 value =
+         wait.mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Memory
+             ? rasterizer ? rasterizer->ReadMemory32(wait.Address<VAddr>()) : *wait.Address()
+@@ -189,6 +192,9 @@ void Liverpool::Process(std::stop_token stoken) {
+             submit_done = false;
+         }
+ 
++        if (rasterizer) {
++            rasterizer->FinishPendingFences();
++        }
+         Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
+     }
+ }
+@@ -749,15 +755,19 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
+             }
+             case PM4ItOpcode::EventWriteEop: {
+                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
++                auto signal = [event = *event_eop] {
++                    event.SignalFence(
++                        [](void* address, u64 data, u32 num_bytes) {
++                            auto* memory = Core::Memory::Instance();
++                            ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
++                        },
++                        [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
++                };
+                 if (rasterizer) {
+-                    rasterizer->OnFence();
++                    rasterizer->DeferFence(std::move(signal));
++                } else {
++                    signal();
+                 }
+-                event_eop->SignalFence(
+-                    [](void* address, u64 data, u32 num_bytes) {
+-                        auto* memory = Core::Memory::Instance();
+-                        ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
+-                    },
+-                    [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
+                 break;
+             }
+             case PM4ItOpcode::DmaData: {
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.cpp b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+index 5826f24d..ff3a2604 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -430,6 +430,7 @@ void Rasterizer::OnSubmit() {
+ }
+ 
+ void Rasterizer::OnWriteData(VAddr address, u64 size) {
++    FinishPendingFences();
+     if (memory->IsUniquelyMapped(address, size).value_or(false)) {
+         texture_cache.ProcessDownloadImages(address, size);
+     } else {
+@@ -438,7 +439,37 @@ void Rasterizer::OnWriteData(VAddr address, u64 size) {
+ }
+ 
+ void Rasterizer::OnFence() {
+-    texture_cache.ProcessDownloadImages();
++    if (texture_cache.QueueDownloadImages() || pending_fences != 0) {
++        scheduler.Finish();
++        scheduler.PopPendingOperations();
++    }
++}
++
++void Rasterizer::DeferFence(Common::UniqueFunction<void> signal) {
++    if (!texture_cache.QueueDownloadImages() && pending_fences == 0) {
++        signal();
++        return;
++    }
++    ++pending_fences;
++    pending_fence_tick = scheduler.CurrentTick();
++    scheduler.DeferOperation([this, signal = std::move(signal)] {
++        signal();
++        --pending_fences;
++    });
++    scheduler.Flush();
++}
++
++void Rasterizer::FinishPendingFences() {
++    if (pending_fences != 0) {
++        scheduler.Wait(pending_fence_tick);
++        scheduler.PopPendingOperations();
++    }
++}
++
++void Rasterizer::PollPendingFences() {
++    if (pending_fences != 0) {
++        scheduler.PopPendingOperations();
++    }
+ }
+ 
+ void Rasterizer::InvalidateImageTables() {
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.h b/src/video_core/renderer_vulkan/vk_rasterizer.h
+index 49cb7177..b0e28619 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.h
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.h
+@@ -86,6 +86,9 @@ public:
+     void Finish();
+     void OnSubmit();
+     void OnFence();
++    void DeferFence(Common::UniqueFunction<void> signal);
++    void PollPendingFences();
++    void FinishPendingFences();
+     void OnWriteData(VAddr address, u64 size);
+     void InvalidateImageTables();
+ 
+@@ -172,6 +175,8 @@ private:
+     VideoCore::TextureCache texture_cache;
+     AmdGpu::Liverpool* liverpool;
+     Core::MemoryManager* memory;
++    u32 pending_fences{};
++    u64 pending_fence_tick{};
+     boost::icl::interval_set<VAddr> mapped_ranges;
+     Common::SharedFirstMutex mapped_ranges_mutex;
+     PipelineCache pipeline_cache;
+diff --git a/src/video_core/texture_cache/texture_cache.cpp b/src/video_core/texture_cache/texture_cache.cpp
+index dd9cd54c..cb5f359e 100644
+--- a/src/video_core/texture_cache/texture_cache.cpp
++++ b/src/video_core/texture_cache/texture_cache.cpp
+@@ -96,6 +96,13 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
+ TextureCache::~TextureCache() = default;
+ 
+ void TextureCache::ProcessDownloadImages(VAddr address, u64 size) {
++    if (QueueDownloadImages(address, size)) {
++        scheduler.Finish();
++        scheduler.PopPendingOperations();
++    }
++}
++
++bool TextureCache::QueueDownloadImages(VAddr address, u64 size) {
+     std::unique_lock lk{download_images_mutex};
+     bool downloaded = false;
+     for (auto it = download_images.begin(); it != download_images.end();) {
+@@ -108,10 +115,7 @@ void TextureCache::ProcessDownloadImages(VAddr address, u64 size) {
+         download_images.erase(it++);
+         downloaded = true;
+     }
+-    if (downloaded) {
+-        scheduler.Finish();
+-        scheduler.PopPendingOperations();
+-    }
++    return downloaded;
+ }
+ 
+ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags flags) {
+diff --git a/src/video_core/texture_cache/texture_cache.h b/src/video_core/texture_cache/texture_cache.h
+index e26d2c0c..24fc28ba 100644
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -151,6 +151,7 @@ public:
+ 
+     /// Schedules a copy of pending images for download back to CPU memory.
+     void ProcessDownloadImages(VAddr address = 0, u64 size = 0);
++    bool QueueDownloadImages(VAddr address = 0, u64 size = 0);
+ 
+     /// Retrieves the image handle of the image with the provided attributes.
+     [[nodiscard]] ImageId FindImage(ImageDesc& desc, bool exact_fmt = false);

@@ -36,3 +36,7 @@ and raw read at the same address. Both tiled and linear variants check that an
 existing image which temporarily has no valid GPU data is not mistaken for an
 address with no registered image. Initial raw reads before the first image write
 also exercise creation of a new image at a previously buffer-only address.
+
+The linear-layout case additionally writes two images on the GPU, executes an unrelated WRITE_DATA and a one-word WRITE_DATA into one image, then samples both images. The changed word, untouched GPU-written neighbors, the other pending image, and output guards are checked. This covers selective image downloads before command-processor writes; ordinary EOP completion still makes all remaining outputs visible.
+
+A separate diagnostic through a second physical-memory alias currently fails on the unchanged control (the old image value is sampled). Its source is preserved as diagnostics/performance/image-write-alias-main.c; this is not included in the passing normal-address oracle. Aliased or uncertain WRITE_DATA destinations retain the conservative full-download path.

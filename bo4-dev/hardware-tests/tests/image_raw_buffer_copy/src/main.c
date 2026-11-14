@@ -185,8 +185,56 @@ int main(void) {
             }
         }
         st_emit_marker("CHECK", "layout=%u cpu_then_gpu=1 raw_bytes=64 guards=64", layout);
+        if (layout) {
+            volatile uint32_t* other_output = st_arena_alloc(&arena, OUTPUT_WORDS * 4, 65536);
+            volatile uint32_t* unrelated = st_arena_alloc(&arena, 4096, 65536);
+            if (!other_output || !unrelated)
+                return st_fail("reason=write_data_allocation");
+            GnmBuffer other_result = st_raw_buffer(other_output, LANES * 4);
+            other_result.stride = 4;
+            other_result.numrecords = LANES;
+            st_fill_words(output, OUTPUT_WORDS, poison);
+            st_fill_words(other_output, OUTPUT_WORDS, poison);
+            StDcb dcb;
+            st_dcb_begin(&dcb, &queue);
+            for (unsigned image = 0; image < 2; ++image) {
+                GnmBuffer value = {0};
+                ((uint32_t*)&value)[0] = 0xabcdef00u + image * 0x100u;
+                sceGnmDrawCmdSetCsShader(&dcb.cmd, &writer);
+                sceGnmDrawCmdSetTsharpUserData(&dcb.cmd, GNM_STAGE_CS, 0, image ? &dst : &src);
+                sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 8, &value);
+                sceGnmDrawCmdDispatchDirect(&dcb.cmd, 1, 1, 1, 0);
+                st_dcb_barrier(&dcb, 0);
+            }
+            const uint32_t changed = 0x10293847u;
+            st_dcb_write_data(&dcb, unrelated, &changed, 1);
+            st_dcb_write_data(&dcb, source + 17, &changed, 1);
+            st_dcb_barrier(&dcb, 0);
+            for (unsigned image = 0; image < 2; ++image) {
+                sceGnmDrawCmdSetCsShader(&dcb.cmd, &reader);
+                sceGnmDrawCmdSetTsharpUserData(&dcb.cmd, GNM_STAGE_CS, 0, image ? &dst : &src);
+                sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 8,
+                                              image ? &other_result : &result);
+                sceGnmDrawCmdDispatchDirect(&dcb.cmd, 1, 1, 1, 0);
+                st_dcb_barrier(&dcb, 0);
+            }
+            if (!submit_and_wait(&dcb) || *unrelated != changed)
+                return st_fail("reason=write_data_submit");
+            for (unsigned image = 0; image < 2; ++image) {
+                volatile uint32_t* observed = image ? other_output : output;
+                for (unsigned word = 0; word < OUTPUT_WORDS; ++word) {
+                    const uint32_t want = word >= LANES ? poison
+                        : image == 0 && word == 17 ? changed
+                        : 0xabcdef00u + image * 0x100u + word;
+                    if (observed[word] != want)
+                        return st_fail("write_data image=%u word=%u expected=%08x got=%08x",
+                                       image, word, want, observed[word]);
+                }
+            }
+            st_emit_marker("CHECK", "write_data_partial_image=1 other_pending_image=1 guards=1");
+        }
     }
-    st_emit_marker("PASS", "layouts=2 gpu_writes=2 raw_copy_bytes=65536 partial_offsets=3 cpu_then_gpu=1 guards=1");
+    st_emit_marker("PASS", "layouts=2 gpu_writes=2 raw_copy_bytes=65536 partial_offsets=3 cpu_then_gpu=1 write_data_partial_image=1 guards=1");
     st_arena_destroy(&arena);
     return 0;
 }
