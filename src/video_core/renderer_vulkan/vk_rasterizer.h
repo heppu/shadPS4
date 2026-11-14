@@ -281,6 +281,7 @@ private:
         s32 current_set{-1};
         bool has_unresolved{};
         bool built_empty{};
+        bool entries_changed{};
         bool has_gpu_images{};
         bool is_depth{};
         bool is_r128{};

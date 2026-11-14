@@ -1548,3 +1548,25 @@ A separate 4 MiB readback-window experiment measured 18.45 FPS, versus 19.58 for
 the preceding 512 KiB run, on the variable stationary IX workload. No improvement
 was demonstrated; the original 512 KiB window is restored. Its saved binary and
 profile are shadps4-readback4 and readback4-arena respectively.
+
+The empty-lookup native run completed at 21.63 FPS (render CPU 57.9%, GPU busy
+48.2%); its final thirty seconds averaged 27.5 FPS. FindImageForBuffer's sampled
+CPU share fell from 11.17% to 4.77%. The workload remains variable and includes
+downed/revive transitions; sustained playable combat is not established. A
+post-timing readback-address diagnostic captured 128 drains across frames
+6606–6618, with 60,731,456 copied bytes, while still in the IX match
+(empty-readbacks.json and perf-empty-diagnostic.png).
+
+### Copy descriptor arrays only after a change (checkpoint)
+
+Image table refreshes now compare each resolved entry with the current set before
+copying its key/view/layout arrays. When nothing changes, the existing set is
+retained without bulk copies or full-array comparisons. All image resolution,
+layout transitions, barriers and stale-view validation remain active. Descriptor
+rewrites explicitly reset the arrays so removed entries cannot survive a rebuild;
+unchanged descriptors can use the lazy path even during a full image refresh.
+
+All sixteen rendering probes pass (lazy-table-summary.log), including repeated
+mixed CPU/GPU image reads, shared views, remaps and descriptor rewrites. Build:
+lazy-table-build.log; exact saved binary: shadps4-lazy-table. Native timing is in
+progress. This is a checkpoint, not a claim that the performance goal is met.
