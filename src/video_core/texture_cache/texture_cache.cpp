@@ -766,11 +766,20 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
 }
 
 ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
+    const u64 generation = image_registration_generation.load(std::memory_order_acquire);
+    const u64 index =
+        ((address >> 6) ^ (address >> 16) ^ (address >> 32)) & (empty_image_addresses.size() - 1);
+    auto& empty = empty_image_addresses[index];
+    if (empty.address == address && empty.generation == generation) {
+        return {};
+    }
+    bool has_image = false;
     ImageId candidate{};
     ImageId exact{};
     u32 candidates = 0;
     u32 exact_matches = 0;
     ForEachImageInRegion(address, 1, [&](ImageId image_id, Image& image) {
+        has_image = true;
         if (!image.HasGpuValidData() || address < image.info.guest_address ||
             address - image.info.guest_address >= image.info.guest_size) {
             return;
@@ -782,6 +791,9 @@ ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
             ++exact_matches;
         }
     });
+    if (!has_image) {
+        empty = {address, generation};
+    }
     const ImageId selected = exact_matches == 1 ? exact : candidates == 1 ? candidate : ImageId{};
     if (selected) {
         TouchImage(slot_images[selected]);
@@ -1060,6 +1072,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
             .id = image_id,
         });
     });
+    image_registration_generation.fetch_add(1, std::memory_order_release);
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
