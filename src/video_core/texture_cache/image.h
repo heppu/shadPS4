@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <optional>
 
@@ -185,6 +186,7 @@ public:
     u64* memory_usage_counter{};
     u64 image_uid{};
     ImageId cache_id{};
+    std::atomic<u64>* update_version_counter{};
     u64 lru_id{};
     u64 tick_accessed_last{};
     u64 gc_tick_touched{};
