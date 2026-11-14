@@ -4,6 +4,7 @@
 #pragma once
 
 #include <deque>
+#include <list>
 #include <map>
 #include <mutex>
 #include <span>
@@ -208,7 +209,14 @@ private:
         u32 size_blocks;
     };
     std::unordered_map<VkDeviceMemory, BackingAllocation> backing_blocks;
-    std::multimap<u32, vk::DeviceMemory> backing_pool;
+    using BackingPoolKey = std::pair<u32, u64>;
+    std::list<BackingPoolKey> backing_pool_order;
+    struct PooledBacking {
+        vk::DeviceMemory memory;
+        std::list<BackingPoolKey>::iterator order;
+    };
+    std::map<BackingPoolKey, PooledBacking> backing_pool;
+    u64 backing_pool_age{};
     std::mutex backing_pool_mutex;
     u64 backing_pool_bytes{};
 

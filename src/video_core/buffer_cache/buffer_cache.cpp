@@ -115,8 +115,8 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
 }
 
 BufferCache::~BufferCache() {
-    for (const auto& [blocks, memory] : backing_pool) {
-        instance.GetDevice().freeMemory(memory);
+    for (const auto& [blocks, backing] : backing_pool) {
+        instance.GetDevice().freeMemory(backing.memory);
     }
 }
 
@@ -378,8 +378,10 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
 vk::DeviceMemory BufferCache::AllocateBacking(u32 num_blocks) {
     {
         std::scoped_lock lk{backing_pool_mutex};
-        if (const auto it = backing_pool.find(num_blocks); it != backing_pool.end()) {
-            const auto memory = it->second;
+        if (const auto it = backing_pool.lower_bound({num_blocks, 0});
+            it != backing_pool.end() && it->first.first == num_blocks) {
+            const auto memory = it->second.memory;
+            backing_pool_order.erase(it->second.order);
             backing_pool.erase(it);
             backing_pool_bytes -= u64{num_blocks} << block_shift;
             return memory;
@@ -399,15 +401,28 @@ vk::DeviceMemory BufferCache::AllocateBacking(u32 num_blocks) {
 void BufferCache::RecycleBacking(vk::DeviceMemory memory, u32 num_blocks) {
     static constexpr u64 MaxPoolBytes = 128_MB;
     const u64 size = u64{num_blocks} << block_shift;
+    if (size > MaxPoolBytes) {
+        instance.GetDevice().freeMemory(memory);
+        return;
+    }
+    boost::container::small_vector<vk::DeviceMemory, 4> retired;
     {
         std::scoped_lock lk{backing_pool_mutex};
-        if (size <= MaxPoolBytes - backing_pool_bytes) {
-            backing_pool.emplace(num_blocks, memory);
-            backing_pool_bytes += size;
-            return;
+        while (size > MaxPoolBytes - backing_pool_bytes) {
+            const auto oldest = backing_pool.find(backing_pool_order.front());
+            retired.push_back(oldest->second.memory);
+            backing_pool_bytes -= u64{oldest->first.first} << block_shift;
+            backing_pool_order.pop_front();
+            backing_pool.erase(oldest);
         }
+        const BackingPoolKey key{num_blocks, ++backing_pool_age};
+        backing_pool_order.push_back(key);
+        backing_pool.emplace(key, PooledBacking{memory, std::prev(backing_pool_order.end())});
+        backing_pool_bytes += size;
     }
-    instance.GetDevice().freeMemory(memory);
+    for (const auto allocation : retired) {
+        instance.GetDevice().freeMemory(allocation);
+    }
 }
 
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block) {
