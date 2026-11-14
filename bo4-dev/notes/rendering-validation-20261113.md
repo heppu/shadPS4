@@ -1974,3 +1974,21 @@ A later 24-wait diagnostic finds 23 CPU-requested readbacks and one inline
 request, scattered across memory windows. These were sampled after the timed
 combat sequence; they may include death/cleanup and must not be assumed to
 represent the measured combat workload without an earlier live sample.
+
+Further tuning checks retain the layered-copy binary. array-high-clock averages
+20.7500 FPS (render CPU 15, GPU high), endpoint alive at 200 health; its render
+CPU cost is 27.48 ms/frame versus 20.22 ms/frame on array-high-x3d. Different
+scenes remain a limitation. array-peak-x3d averages 27.4333 FPS under fixed peak
+GPU policy with CPU 7, endpoint alive at 200 health, intervals
+28.2/24.5/26.6/28.5/30.0/26.8. Fixed peak clocks do not establish an improvement.
+array-dedicated-x3d excludes CPUs 7/23 from 56 other emulator threads and pins
+the render thread to 7; it averages 26.3000 FPS but ends downed and is INVALID
+for normal combat comparison. All temporary GPU policies are restored to auto.
+
+The post-sample live readback stack identifies a Game:Main read fault of eight
+bytes waiting for GPU-written data, not proof that waits can be removed. The
+first table-workload script also caught inline locations and produced 95
+invalid rows; table-workload-entry.gdb fixes it with the actual function entry.
+Its 96 valid rows include large 2466/2483-entry tables with 16/21 dynamic entries
+and both conservative full and static refreshes. This motivates caching lookup
+references with exact generation invalidation, without relaxing remap rules.
