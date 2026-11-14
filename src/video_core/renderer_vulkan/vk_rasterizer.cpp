@@ -1675,6 +1675,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                             resolved.used_tick = epoch;
                             texture_cache.KeepAlive(resolved.image_id);
                         }
+                        set_entry(candidate.index, candidate.key, resolved.view, resolved.layout);
                         return;
                     }
                 }
@@ -1916,12 +1917,13 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_alias_generation != alias_generation || is_switched || source_changed) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
+        const bool images_removed =
+            it->current_set >= 0 &&
+            image_table_sets[it->current_set].generation != texture_cache.ImageGeneration();
         bool refresh_all = it->current_set < 0 ||
                            it->checked_alias_generation != alias_generation ||
-                           !table_remapped_ranges.empty() ||
-                           (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
-                                                        texture_cache.ImageGeneration());
-        const bool refresh_static = it->checked_tick != gc_tick ||
+                           !table_remapped_ranges.empty();
+        const bool refresh_static = images_removed || it->checked_tick != gc_tick ||
                                     it->checked_update_generation != update_generation ||
                                     it->checked_state_generation != state_generation ||
                                     it->validated_view_generation != table_view_generation;
@@ -1966,14 +1968,13 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                     }
                 }
                 it->entries.swap(image_table_entries);
-                refresh_all |= it->entries_changed;
             }
         } else {
             refresh_all |= !it->entries.empty();
             it->entries_changed |= !it->entries.empty();
             it->entries.clear();
         }
-        if (refresh_all || refresh_changed) {
+        if (refresh_all || refresh_changed || it->entries_changed) {
             it->checked_update_generation = update_generation;
             it->checked_state_generation = state_generation;
             BuildImageTableSet(table_index, &image_desc, refresh_all, refresh_static);
