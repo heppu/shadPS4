@@ -104,7 +104,7 @@ def main():
     mode = os.environ.get('BO4_GPU_MODE', 'high')
     if mode not in ('off', 'high', 'profile_peak'):
         raise SystemExit('BO4_GPU_MODE must be off, high or profile_peak')
-    command = [str(HERE / ('run' if headless else 'play'))]
+    command = [str(HERE / ('run' if headless else 'play-session'))]
     if headless:
         seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 1200
         if seconds <= 0:

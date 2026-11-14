@@ -36,7 +36,8 @@ frame does not establish full-match stability or clear disabled Vulkan checks.
 
 ## Performance launch
 
-Run `./play-fast` from the live directory for the windowed performance preset.
+Run `./play` from the live directory for the windowed performance preset.
+`./play-fast` is also available directly.
 It temporarily selects the GPU's `high` power policy and, on CPUs with unequal
 L3 caches, places the rendering thread on a physical core in the largest cache
 cluster. The helper restores the previous GPU policy when its game process exits.

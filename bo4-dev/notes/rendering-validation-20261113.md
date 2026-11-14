@@ -1962,7 +1962,7 @@ eight cases / four formats on both control and candidate, including packed
 The native profile no longer lists the driver download hotspot above 1%.
 
 array-download-moving averages 17.2666 FPS under auto, but ends downed and is
-INVALID as a normal combat result. The valid array-high-x3d run averages
+INVALID as a normal combat result. The array-high-x3d run averages
 28.9000 FPS with high GPU policy and render CPU 7, versus 23.6666 in the earlier
 retained-high-x3d run under those settings. Intervals are
 27.5/23.8/26.3/29.4/31.3/35.1; endpoint alive with 200 health, textured arena,
@@ -2063,3 +2063,46 @@ shared-work wait loops (0x14b9330 and 0x13ec8c0), rather than independent expens
 computations. These loops are not patched. Earlier whole-CCD affinity and
 submission-interval experiments are already documented and are not established
 improvements. Temporary GPU policy is verified restored after every stopped run.
+
+
+### Correction: endpoint health does not establish an uninterrupted combat run
+
+An intermediate-frame audit invalidates the previous description of
+array-high-x3d as a valid normal-combat minute: sample-030.png shows Bleed Out 1,
+while sample-060.png is alive after an automatic revive. Its 28.9 FPS full-minute
+average contains downed gameplay. The same problem affects pgo-o2-repeat:
+31.5000 FPS with intervals 28.7/30.0/25.2/38.0/33.0/34.1, but sample-030.png is
+downed despite the final 200 health. Its full-minute result is also INVALID.
+The earlier endpoint-only claims must not be carried forward as proof of sustained
+normal combat. Inspect all timed screenshots and remaining revives before
+classifying a run. The replacement running/turning sequence uses ordinary inputs,
+without altering game rules or damage, and is being evaluated.
+
+
+### Performance preset and active-play measurement
+
+pgo-running completes 60 seconds at 33.3166 FPS with high GPU policy and render
+CPU 7. Its ten-second intervals are 33.0/33.3/32.2/34.0/33.5/33.9. All six timed
+screenshots show 200 health and both initial revives still available; no downed
+interval or automatic revive contaminates this sample. The running/turning route
+contains close walls as well as open arena views and occasional firing, so it is
+not an identical workload comparison with the old walking/firing route. Arena
+materials, lighting, fire, weapon and HUD remain visible and textured. Rendering
+CPU averages 63.85%, or 19.16 ms/frame. The later container exit is an explicit
+Docker SIGTERM/stop (exit143), not a logged emulator crash or memory-guard limit;
+its cause is not established. The policy helper restores auto. A detached
+launcher is used for the longer repeat.
+
+The three-minute repeat pgo-running-long already shows a downed state at its
+30-second screenshot, despite later revival. Its full average must not be used
+as an uninterrupted active-play performance number. Scene and enemy variation
+remain material; the clean one-minute result does not establish a locked frame
+rate in every map or battle.
+
+The normal play command now delegates to play-fast; the prior windowed launch
+is retained as play-session. The actual audio, input, gamepad and display setup
+is unchanged. Shell/Python syntax and play --help dispatch checks pass. The
+headless preset has exercised GPU policy, CPU placement, input routing and
+policy restoration in native runs. The native-CPU O2 PGO build is retained;
+the aggressive O3/ThinLTO build is rejected. All 23 rendering probes pass on
+the retained compiler build, with the separately documented presentation warning.
