@@ -329,7 +329,6 @@ private:
     u32 table_steals{};
     u64 table_verify_tick{};
     u64 table_verify_bytes{};
-    std::vector<u8> table_verify_data;
     boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
 
     struct BoundBuffer {
