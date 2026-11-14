@@ -178,6 +178,9 @@ bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
     if (changed && dst_layout != vk::ImageLayout::eShaderReadOnlyOptimal && image->usage.texture &&
         !image->usage.storage && !image->usage.render_target && !image->usage.depth_target &&
         False(image->flags & VideoCore::ImageFlagBits::GpuModified)) {
+        if (image->update_version_counter) {
+            image->update_version_counter->fetch_add(1, std::memory_order_release);
+        }
         ++image_state_generation;
     }
     return changed;
