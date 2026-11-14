@@ -108,6 +108,8 @@ public:
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool async = false,
                     bool assume_locks = false);
 
+    void ReadHostMemory(VAddr device_addr, std::span<u8> dest);
+
     /// Flushes GPU modified ranges of the uncovered part of the edge pages of an image.
     void ReadEdgeImagePages(const Image& image);
 
