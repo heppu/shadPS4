@@ -1589,3 +1589,22 @@ executable with submit_draw_interval=256 (large-table-summary.log). The existing
 WRITE_AFTER_PRESENT warning is still present in these runs; numerical PASS does
 not mean validation is completely clean. Native interval-256 timing is in
 progress, with the original interval-zero config backed up for restoration.
+
+### Image-page occupancy shortcut (checkpoint)
+
+A 512 KiB atomic bitmap now records which texture-registry pages contain images.
+GPU buffer lookups skip the registry lock when their starting page has no image.
+Registration sets the bit after inserting the page entry; unregistration clears
+it only after removing that page's last image. Nonempty pages retain the exact
+address cache and existing image selection. Out-of-range addresses fall back to
+the existing lookup. This does not cache GPU-valid/dirty state as absence.
+
+All sixteen probes pass, including the expanded large-table and CPU-then-GPU
+raw-copy cases (page-bits-summary.log). Build: page-bits-build.log. Exact binary:
+shadps4-page-bits. Native measurement is in progress with interval zero and
+default CPU placement.
+
+The interval-256 experiment regressed to 2.73 FPS, with rendering CPU 24.43% and
+GPU busy 94.95%. It is rejected and the prior interval-zero configuration was
+restored. The profile and post-timing wait diagnostic are retained under
+submit256-arena; periodic submission is not a recommended setting.
