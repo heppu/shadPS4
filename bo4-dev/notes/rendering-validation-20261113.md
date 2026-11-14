@@ -1712,3 +1712,13 @@ and three late alias repeats (alias-aware-summary.log). Build:
 alias-aware-final-build.log. The saved original early-alias ELF remains local.
 This improves coverage of the previously intermittent alias issue; broader
 physical-console validation is unavailable. Native performance follows.
+
+The first alias-aware native run regressed to 2.68 FPS (rendering CPU 96.15%).
+TableImageFullHash accounted for 87.63% of rendering CPU samples. Treating every
+cross-VMA texture as potentially aliased forced excessive verification.
+Uniqueness queries now walk all covered direct-memory VMAs and inspect actual
+physical alias bits. The original probe splits both textures into 16 KiB
+NoCoalesce mappings. Saved control fails its physical-alias case; the corrected
+candidate and six early/late alias repeats pass (alias-spans-summary.log).
+Build alias-spans-build.log passes; native alias-spans-moving is in progress.
+Do not use the original alias-aware moving result as a performance improvement.
