@@ -2019,7 +2019,7 @@ an identical final tree and removed all pending fixups before pushing.
 A separate Clang 23.1.4 native-CPU training build succeeds. Its first continuous
 instrumentation variant passes all 23 rendering probes, but llvm-profdata rejects
 the resulting profile as truncated. A tiny indirect-call reproducer also fails;
--dis ... value-profiling experiments show that -mllvm -disable-vp fixes that
+Compiler-option checks show that -mllvm -disable-vp fixes that
 format case, but would lose useful indirect-call data. The replacement uses
 LLVM's explicit profile-write API in a training-only checkpoint thread. Its
 indirect-call diagnostic produces a valid seven-function profile. The full
@@ -2031,3 +2031,35 @@ render thread after startup. An initial headless launch used Wayland while the
 automation used X11; it stayed at the title screen and supplies NO combat profile.
 The headless wrapper now forwards X11 explicitly and that training run is being
 repeated. Optimized-build performance remains unmeasured.
+
+
+### Completed compiler training and rejected aggressive build
+
+The corrected X11 training run reaches moving IX gameplay. Its explicit dump
+returns zero, and llvm-profdata merges 27,012 functions / 206,934 blocks into
+out/performance/pgo.profdata. The checkpoint image shows a textured arena and
+weapon with the player alive at 50 health. This instrumented run is training,
+not a performance measurement.
+
+The native-CPU O2 profile-use build succeeds. Its ninja rules contain profile-use
+and no generation/checkpoint object; nm confirms the profile-write runtime is
+absent. All 23 original probes pass. The known WRITE-AFTER-PRESENT warning occurs
+in buffer_mapping_lifetimes and runtime_image_loads; no claim of clean presentation
+validation is made. pgo-use-high averages 29.2833 FPS but the player is downed
+partway through, so it is INVALID as a normal combat comparison. GPU busy is
+47.25%, render CPU cost 20.37 ms/frame. No PGO speedup is established yet.
+
+An O3/ThinLTO profile-use experiment also passes all 23 probes but regresses to
+4.4333 FPS in native pgo-thin-high, with GPU busy 92.59% and a downed player.
+The compiler reports some discarded profile records after control-flow changes;
+the initial link also needed explicit -fuse-ld=lld. The aggressive flags are
+removed. Exact rejected binary: shadps4-pgo-thin-rejected; logs pgo-thin-build.log,
+pgo-thin-relink.log and pgo-thin-high-*. The O2 recipe rebuild succeeds again;
+a fresh native repeat is in progress. Both runs report the same 8,729 MiB memory
+budget, so a changed advertised budget does not explain that regression.
+
+Whole-process CPU samples show Game:Main and 2_Backend concentrated in guest
+shared-work wait loops (0x14b9330 and 0x13ec8c0), rather than independent expensive
+computations. These loops are not patched. Earlier whole-CCD affinity and
+submission-interval experiments are already documented and are not established
+improvements. Temporary GPU policy is verified restored after every stopped run.

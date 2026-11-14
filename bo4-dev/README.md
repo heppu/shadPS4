@@ -34,6 +34,26 @@ a crossed limit stops BO4, not the other GPU applications. Preserve the run log,
 watchdog samples and screenshots before restarting. A visually correct sampled
 frame does not establish full-match stability or clear disabled Vulkan checks.
 
+## Performance launch
+
+Run `./play-fast` from the live directory for the windowed performance preset.
+It temporarily selects the GPU's `high` power policy and, on CPUs with unequal
+L3 caches, places the rendering thread on a physical core in the largest cache
+cluster. The helper restores the previous GPU policy when its game process exits.
+Resolution, shaders, audio, gamepad support and memory guards remain configured
+by the existing launcher. `BO4_GPU_MODE=off` disables the power-policy adjustment;
+`BO4_RENDER_CPUS=off` disables thread placement.
+
+`./play-fast --headless 1200` runs the same preset with a time limit. Its input
+backend defaults to X11 for the diagnostic route scripts; `BO4_HEADLESS_DRIVER`
+can override that choice independently of the desktop SDL environment.
+
+`./pgo-build generate|use` supports compiler experiments with the offline
+container dependencies. Generation builds a separate instrumented executable;
+use requires a merged `out/performance/pgo.profdata`. A successful build or probe
+suite does not establish a native gameplay speedup. See the rendering-validation
+notes for measured runs, rejected candidates and remaining work.
+
 ## Runtime buffer-table reproducer
 
 `bo4-dev/hardware-tests/tests/runtime_buffer_table` contains an OpenOrbis

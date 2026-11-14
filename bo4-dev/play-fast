@@ -112,7 +112,7 @@ def main():
         command.append(str(seconds))
     launch_env = dict(os.environ)
     if headless:
-        launch_env.setdefault('SDL_VIDEODRIVER', 'x11')
+        launch_env['SDL_VIDEODRIVER'] = os.environ.get('BO4_HEADLESS_DRIVER', 'x11')
     child = subprocess.Popen(command, cwd=HERE, env=launch_env)
     owned = None
     helper = None
