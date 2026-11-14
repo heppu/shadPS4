@@ -38,3 +38,9 @@ table in one submission. Both images begin as CPU-uploaded textures; the last tw
 reads follow GPU writes to the first image while the second remains unchanged.
 All 512 output words and surrounding guards are checked, including the transition
 from an immutable texture into a GPU-written image.
+
+The layout-refresh follow-up reads two immutable full-size images, then a table
+with a cropped view of only the first image, and finally the original full-size
+table twice. The cropped view requires a transfer from the cached full image;
+subsequent loads must still return both original values. All 512 words and guards
+are checked with synchronization validation enabled.
