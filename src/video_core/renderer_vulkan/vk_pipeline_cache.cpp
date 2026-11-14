@@ -172,6 +172,14 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
         info.hw.fs.num_inputs = regs.num_interp;
         info.hw.fs.front_face_all_bits = regs.barycentric_control.front_face_all_bits;
         info.hw.fs.depth_before_shader = regs.depth_shader_control.depth_before_shader;
+        info.hw.fs.early_depth_safe =
+            (regs.depth_shader_control.z_order == AmdGpu::ZOrder::EarlyZLateZ ||
+             regs.depth_shader_control.z_order == AmdGpu::ZOrder::EarlyZReZ) &&
+            !regs.depth_shader_control.exec_on_hier_fail &&
+            !regs.depth_shader_control.exec_on_noop && regs.depth_control.depth_enable &&
+            !regs.depth_control.depth_write_enable && !regs.depth_control.stencil_enable &&
+            !regs.depth_control.enable_color_writes_on_depth_fail &&
+            !regs.depth_control.disable_color_writes_on_depth_pass;
         info.hw.fs.num_samples =
             regs.ps_input_addr.sample_coverage_ena && regs.ps_input_ena.sample_coverage_ena
                 ? regs.aa_config.NumSamples()

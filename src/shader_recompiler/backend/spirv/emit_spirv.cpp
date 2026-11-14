@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <mutex>
 #include <span>
 #include <type_traits>
@@ -439,7 +440,22 @@ void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitCon
         if (stores_depth) {
             ctx.AddExecutionMode(main, spv::ExecutionMode::DepthReplacing);
         }
-        if (runtime_info.hw.fs.depth_before_shader) {
+        const auto& fs = runtime_info.hw.fs;
+        const bool read_only_dma =
+            (info.uses_dma || info.UsesBufferTables()) && fs.early_depth_safe && !stores_depth &&
+            !info.stores.Get(IR::Attribute::StencilRef) &&
+            !info.stores.Get(IR::Attribute::SampleMask) &&
+            !info.loads.Get(IR::Attribute::SampleMask) &&
+            !info.loads.Get(IR::Attribute::IsHelperInvocation) && !info.has_discard &&
+            !fs.alpha_to_mask_enable && !fs.coverage_to_mask_enable &&
+            std::ranges::none_of(info.buffers,
+                                 [](const BufferResource& buffer) {
+                                     return buffer.is_written &&
+                                            buffer.buffer_type != BufferType::BdaPagetable &&
+                                            buffer.buffer_type != BufferType::FaultBuffer;
+                                 }) &&
+            std::ranges::none_of(info.images, &ImageResource::is_written);
+        if (fs.depth_before_shader || read_only_dma) {
             ctx.AddExecutionMode(main, spv::ExecutionMode::EarlyFragmentTests);
             ASSERT_MSG(!stores_depth, "DEPTH_BEFORE_SHADER enabled with depth exporting shader");
         }
