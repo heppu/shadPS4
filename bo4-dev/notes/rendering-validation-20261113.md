@@ -1830,3 +1830,33 @@ The existing WRITE_AFTER_PRESENT warning recurs14times across the suite, with no
 new texture-specific validation message. The exact binary is saved as
 out/performance/shadps4-image-snapshot-tuned. Physical-console execution remains
 unavailable; gameplay optimization is still active.
+
+
+### Dynamic-only table refresh and GPU power trials
+
+Image tables keep indices for entries needing repeated resolution. Unchanged
+static entries are skipped as a group until the frame, update, image-state or
+view generation changes. Remaps, alias changes, table edits and image replacement
+still force full refresh. Invalidated views rejoin the dynamic list immediately.
+All 20 original probes pass (dynamic-list-summary.log); the build succeeds.
+
+The first dynamic-list-moving sample ends downed and its 25.12 FPS average is
+INVALID as a normal gameplay comparison. The fresh dynamic-list-repeat sample
+finishes alive with textured arena and weapon surfaces: 24.4333 FPS over 60 seconds,
+render CPU 67.97%, intervals 25.0/24.4/23.8/24.1/23.9/25.4. Post-sample inspection
+found GPU profile_peak active, so this is NOT an auto-policy measurement. A
+32-call diagnostic confirms a sampled table can check 79 dynamic entries instead
+of all 2359 when generations are unchanged. Most observed GPU finishes remain
+CPU buffer readbacks (28/32), with image downloads accounting for 4/32. Two
+render-thread readbacks come from WaitRegMem and BindResources, requiring follow-up.
+
+Before this code change, temporary high mode measured 21.3833 FPS, CPU 62.20%,
+GPU busy 44.69%; profile_peak measured 22.0500 FPS, CPU 65.62%. Both endpoints
+were alive. GPU busy reports 100% in peak mode and is not useful for estimating
+GPU frame time there. The watchdog reported restoration to auto and sysfs
+confirmed it immediately, but later reads after subsequent runs showed peak
+again. A second explicit profile_exit/auto restoration is being checked. All
+power-mode experiments are temporary; no voltage or overclock settings changed.
+
+Performance remains below the target; scene differences prevent treating these
+numbers as controlled speedup ratios. Exact candidate: shadps4-dynamic-list.
