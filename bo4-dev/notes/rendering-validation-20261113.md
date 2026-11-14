@@ -1895,3 +1895,37 @@ three-case vertex_wave_size fixture, pass with core and synchronization validati
 and RADV_PERFTEST=nggc (subgroup-safe-summary.log). The preexisting presentation
 synchronization warning is separate. No physical-console verification is available.
 Exact retained binary: shadps4-subgroup-safe. Gameplay performance work continues.
+
+
+### Surviving images and incremental descriptor-table rebuilds
+
+An unrelated image removal now triggers per-entry lifetime validation instead of
+unconditionally resolving every image again. A changed descriptor rebuilds table
+storage while retaining unchanged static entries; changed and removed descriptors
+still resolve or clear, and remaps/alias changes retain full invalidation.
+
+The original runtime_image_lifetimes homebrew passes seven cases on the saved
+subgroup-safe control and the candidate. It expands a foreign image from one mip
+to two, rebinds the original table unchanged, applies a CPU texture update, then
+changes only the second descriptor. Guards and exact samples pass. GDB confirms
+image generation 0->1 and the surviving table uses full=False/static=True.
+Build and all 22 rendering probes pass (retained-entries-summary.log), with the
+known presentation warning separate from texture validation. Console execution
+remains unavailable.
+
+The intermediate surviving-images-moving run averages 18.3333 FPS under auto,
+render CPU 49.77% (~27.15 ms/frame), GPU busy 57.13%, endpoint alive at 50 health.
+The final retained-entries-moving run averages 18.5666 FPS under auto, render CPU
+49.45% (~26.63 ms/frame), GPU busy 58.20%, endpoint alive at 200 health. Intervals
+19.6/21.1/18.4/14.0/19.8/18.5 demonstrate remaining stalls. Character/scene
+variation and a small CPU difference do not establish an FPS improvement.
+Exact candidate: shadps4-retained-entries. Optimization remains unfinished.
+
+The culling-high-moving sample (23.1166 FPS) and culling-high-pinned sample
+(19.5333 FPS, render CPU restricted to 8-15) both ended downed and are INVALID as
+normal gameplay performance results. The circling input sequence hit the podium.
+All temporary power policies were restored to auto after application shutdown.
+A 48-actual-readback-wait diagnostic had no pending command in 41 cases; simple
+adjacent command batching therefore has limited demonstrated opportunity. A
+96-table diagnostic found 14 full refreshes with unchanged entries but changed
+image lifetime generation, supporting the narrower cache invalidation above.
