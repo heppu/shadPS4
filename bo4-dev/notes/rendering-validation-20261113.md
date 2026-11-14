@@ -1688,3 +1688,27 @@ sharing its protected page. Its Python breakpoint callback logged nonmatching
 hits too; only the final conditional hit is evidence for that specific overlap.
 This suggests precise backing snapshots could avoid some parser readbacks, but
 no such bypass has been implemented.
+
+### Alias-aware sampled-image refresh (checkpoint)
+
+Direct-memory mappings now maintain per-guest-page mapping counts and an alias
+bitmap. An atomic generation changes when pages become aliased or unique again.
+Uniqueness queries use the existing mapping lock, report uncertainty on lock
+contention, and retry rather than caching uncertainty as a stable classification.
+Non-direct or cross-VMA spans retain conservative behavior. Mapping-count updates
+cover direct maps and clipped direct unmaps; the bitmap adds about 128 KiB per
+16 GiB of direct backing, plus roughly 4 MiB of counts.
+
+Sampled tables can now use per-image revisions across unrelated layout changes
+when a texture is uniquely mapped. Aliased textures remain dynamic and verify
+CPU backing at frame/cache-invalidation boundaries, without the ordinary
+backoff/budget skipping those checks. New alias generations force classification
+refresh. Existing mapping, dirty-image, layout and stale-view checks remain.
+
+The original runtime_image_updates follow-up removes its initial alias after
+the first read, then recreates it before writing new pixels. Saved control passes
+three late-alias runs. The candidate passes all sixteen probes plus three early
+and three late alias repeats (alias-aware-summary.log). Build:
+alias-aware-final-build.log. The saved original early-alias ELF remains local.
+This improves coverage of the previously intermittent alias issue; broader
+physical-console validation is unavailable. Native performance follows.
