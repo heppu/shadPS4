@@ -1762,14 +1762,15 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_generation != table_cache_generation || is_switched) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
-        bool refresh_all = it->current_set < 0 || it->checked_tick != gc_tick ||
-                           it->checked_state_generation != state_generation ||
-                           !table_remapped_ranges.empty() ||
-                           (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
-                                                        texture_cache.ImageGeneration());
+        bool refresh_all =
+            it->current_set < 0 || it->checked_tick != gc_tick ||
+            (!it->is_depth && !it->is_read && it->checked_state_generation != state_generation) ||
+            !table_remapped_ranges.empty() ||
+            (it->current_set >= 0 &&
+             image_table_sets[it->current_set].generation != texture_cache.ImageGeneration());
         const bool refresh_changed = it->checked_update_generation != update_generation ||
-                                     it->has_unresolved || it->has_gpu_images || it->is_depth ||
-                                     it->is_read;
+                                     it->checked_state_generation != state_generation ||
+                                     it->has_unresolved || it->has_gpu_images;
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
