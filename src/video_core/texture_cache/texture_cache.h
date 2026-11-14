@@ -73,6 +73,7 @@ class TextureCache {
         static constexpr bool NULL_CHECK = true;
     };
     using PageTable = Common::MultiLevelPageTable<Traits>;
+    static constexpr u64 NumImagePages = 1ULL << (Traits::ADDRESS_SPACE_BITS - Traits::PAGE_BITS);
 
 public:
     enum class BindingType : u32 {
@@ -501,6 +502,7 @@ private:
     PageTable page_table;
     Common::SlotVector<Image> slot_images;
     std::unique_ptr<std::atomic<u64>[]> image_update_versions;
+    std::unique_ptr<std::atomic<u64>[]> image_page_bits;
     Common::SlotVector<ImageView> slot_image_views;
     Common::SlotVector<Sampler> slot_samplers;
     BlitHelper blit_helper;
