@@ -1807,3 +1807,26 @@ Further CPU attribution: libc offset 0x185f2e (and adjacent hot offsets) is insi
 a vectorized byte-comparison loop, confirmed by disassembling the runtime libc.
 Perf's inlined vector-assign labels should not be interpreted as direct proof of
 allocation costs. Repeated raw descriptor comparisons remain significant.
+
+
+### Shared image descriptor snapshots and precise refresh
+
+Image table descriptors now snapshot before any stage's output buffers are bound,
+using one source revision for texture-type variants of the same guest table.
+Original image_table_shared_page reproduces the output-tracking ordering bug with
+image descriptors: all 384 sample outputs remain deadbeef on saved debd5f1f, while
+the candidate passes CPU/GPU descriptor replacements and neighbor/output guards.
+
+The first implementation copied every image table on every draw and regressed to
+13.5833 FPS. Its later 80-second sample ends on the after-action menu and is INVALID
+as a gameplay measurement. The tuned path retains the former check-skip conditions
+and compares physical backing directly before copying changed bytes. Snapshot CPU
+share drops from 50.05% to 3.42%. GetImageTableSet accounts for 21.49%, including
+16.77% in BuildImageTableSet. Native image-snapshot-tuned-moving averages17.9000 FPS,
+CPU54.83%, GPU52.08%. It is not a demonstrated FPS gain over the18.77 wave32 run.
+
+Build and all20 original rendering probes pass (image-snapshot-tuned-summary.log).
+The existing WRITE_AFTER_PRESENT warning recurs14times across the suite, with no
+new texture-specific validation message. The exact binary is saved as
+out/performance/shadps4-image-snapshot-tuned. Physical-console execution remains
+unavailable; gameplay optimization is still active.
