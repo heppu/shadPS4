@@ -151,6 +151,43 @@ bool MemoryManager::SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<
     return true;
 }
 
+std::optional<bool> MemoryManager::CompareDirectBacking(VAddr virtual_addr,
+                                                        std::span<const u8> data) {
+    if (data.empty()) {
+        return true;
+    }
+    std::shared_lock lk{mutex, std::try_to_lock};
+    if (!lk.owns_lock() || !IsValidMapping(virtual_addr) ||
+        !IsValidMapping(virtual_addr + data.size() - 1)) {
+        return std::nullopt;
+    }
+    auto vma = FindVMA(virtual_addr);
+    u64 consumed = 0;
+    while (consumed < data.size()) {
+        const auto& area = vma->second;
+        if (area.type != VMAType::Direct || False(area.prot & MemoryProt::CpuRead)) {
+            return std::nullopt;
+        }
+        const u64 offset = virtual_addr + consumed - area.base;
+        const u64 chunk_size = std::min<u64>(data.size() - consumed, area.size - offset);
+        const u64 expected = consumed + chunk_size;
+        bool matches = true;
+        area.ForEachPhysArea(offset, chunk_size, [&](PAddr address, u64 bytes) {
+            matches &=
+                std::memcmp(data.data() + consumed, impl.BackingBase() + address, bytes) == 0;
+            consumed += bytes;
+        });
+        if (consumed != expected) {
+            return std::nullopt;
+        }
+        if (!matches) {
+            return false;
+        }
+        ++vma;
+    }
+    return true;
+}
+
 std::optional<u64> MemoryManager::HashDirectBacking(VAddr virtual_addr, u64 size) {
     std::shared_lock lk{mutex, std::try_to_lock};
     if (!lk.owns_lock() || size == 0 || !IsValidMapping(virtual_addr) ||
