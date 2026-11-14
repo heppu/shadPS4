@@ -28,7 +28,7 @@ int main(void) {
     st_begin();
     StArena arena;
     StQueue queue;
-    if (!st_arena_init(&arena, 4 * 1024 * 1024) || !st_queue_init(&arena, &queue))
+    if (!st_arena_init(&arena, 16 * 1024 * 1024) || !st_queue_init(&arena, &queue))
         return st_fail("reason=allocation");
     void* code = st_arena_alloc(&arena, sizeof(copy_shader), 256);
     memcpy(code, copy_shader, sizeof(copy_shader));
@@ -77,14 +77,15 @@ int main(void) {
         tables[t][1] = tables[t][0];
     }
     GnmSampler sampler = {0};
-    StCase cases[7] = {{.name = "initial"},
+    StCase cases[8] = {{.name = "initial"},
                        {.name = "foreign_small"},
                        {.name = "foreign_expanded"},
                        {.name = "surviving_table"},
                        {.name = "cpu_update"},
                        {.name = "one_descriptor_update"},
+                       {.name = "cache_growth"},
                        {.name = "guards"}};
-    for (unsigned phase = 0; phase < 6; ++phase) {
+    for (unsigned phase = 0; phase < 39; ++phase) {
         if (phase == 4) {
             for (unsigned i = 0; i < sizes[0] / 4; ++i)
                 pixels[0][i] = .5f;
@@ -94,8 +95,20 @@ int main(void) {
             tables[0][1] = textures[1];
             st_store_fence();
         }
-        GnmBuffer table = st_raw_buffer(tables[phase == 1 ? 1 : phase == 2 ? 2 : 0],
-                                       2 * sizeof(GnmTexture));
+        GnmTexture* selected = tables[phase == 1 ? 1 : phase == 2 ? 2 : 0];
+        if (phase >= 6 && phase < 38) {
+            selected = st_arena_alloc(&arena, 2 * sizeof(GnmTexture), 65536);
+            float* grown_pixels = st_arena_alloc(&arena, sizes[0], 65536);
+            if (!selected || !grown_pixels)
+                return st_fail("reason=growth_allocation");
+            for (unsigned i = 0; i < sizes[0] / 4; ++i)
+                grown_pixels[i] = (float)phase / 64.f;
+            selected[0] = textures[0];
+            sceGnmTexSetBaseAddress(&selected[0], grown_pixels);
+            selected[1] = selected[0];
+            st_store_fence();
+        }
+        GnmBuffer table = st_raw_buffer(selected, 2 * sizeof(GnmTexture));
         table.stride = sizeof(GnmTexture);
         table.numrecords = 2;
         volatile uint32_t* output = st_arena_alloc(&arena, 144 * 4, 65536);
@@ -116,16 +129,18 @@ int main(void) {
             return st_fail("reason=submit");
         for (unsigned i = 0; i < 144; ++i) {
             uint32_t expected = 0xdeadbeef;
-            unsigned which = 6;
+            unsigned which = 7;
             if (i >= 8 && i < 136) {
-                which = phase;
+                which = phase < 6 ? phase : 6;
                 const float original = .125f + (float)(32 * 64 + 32) / 16384.f;
                 float value = phase >= 4 && (phase == 4 || i < 72) ? .5f : original;
+                if (phase >= 6 && phase < 38)
+                    value = (float)phase / 64.f;
                 memcpy(&expected, &value, 4);
             }
             st_case_expect(&cases[which], "word", i, expected, output[i]);
         }
     }
     sceGnmSubmitDone();
-    return st_finish_cases(cases, 7, "foreign_mip_expansion=1 surviving_table=1 cpu_update=1 one_descriptor_update=1 guards=1");
+    return st_finish_cases(cases, 8, "foreign_mip_expansion=1 surviving_table=1 cpu_update=1 one_descriptor_update=1 cache_growth=32 guards=1");
 }

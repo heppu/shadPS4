@@ -1992,3 +1992,19 @@ invalid rows; table-workload-entry.gdb fixes it with the actual function entry.
 Its 96 valid rows include large 2466/2483-entry tables with 16/21 dynamic entries
 and both conservative full and static refreshes. This motivates caching lookup
 references with exact generation invalidation, without relaxing remap rules.
+
+### Rejected table-reference caching candidate
+
+A generation-guarded map-reference cache builds and passes all 23 original
+probes, including an expanded runtime_image_lifetimes fixture with 32 distinct
+foreign textures followed by reuse of the original updated table (eight cases).
+Both the saved array-copy control and candidate pass; the control has the known
+presentation warning and the candidate fixture has no VUID/sync warning.
+The native table-reference-high run is alive at 200 health and averages
+25.5000 FPS under high policy with render CPU 7. Intervals are
+26.9/19.9/21.3/30.5/24.2/30.2; render CPU is 22.96 ms/frame. BuildImageTableSet
+remains 12.50% of render CPU versus 12.27% in array-high-x3d. This does not
+establish a performance gain. The emulator change is removed; its patch and
+exact binary remain in out/performance for diagnostics. The expanded original
+homebrew is retained. The normal retained emulator remains the layered-copy
+implementation. Workload-guided compiler optimization is the next experiment.
