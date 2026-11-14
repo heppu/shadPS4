@@ -1548,3 +1548,44 @@ A separate 4 MiB readback-window experiment measured 18.45 FPS, versus 19.58 for
 the preceding 512 KiB run, on the variable stationary IX workload. No improvement
 was demonstrated; the original 512 KiB window is restored. Its saved binary and
 profile are shadps4-readback4 and readback4-arena respectively.
+
+The empty-lookup native run completed at 21.63 FPS (render CPU 57.9%, GPU busy
+48.2%); its final thirty seconds averaged 27.5 FPS. FindImageForBuffer's sampled
+CPU share fell from 11.17% to 4.77%. The workload remains variable and includes
+downed/revive transitions; sustained playable combat is not established. A
+post-timing readback-address diagnostic captured 128 drains across frames
+6606–6618, with 60,731,456 copied bytes, while still in the IX match
+(empty-readbacks.json and perf-empty-diagnostic.png).
+
+### Copy descriptor arrays only after a change (checkpoint)
+
+Image table refreshes now compare each resolved entry with the current set before
+copying its key/view/layout arrays. When nothing changes, the existing set is
+retained without bulk copies or full-array comparisons. All image resolution,
+layout transitions, barriers and stale-view validation remain active. Descriptor
+rewrites explicitly reset the arrays so removed entries cannot survive a rebuild;
+unchanged descriptors can use the lazy path even during a full image refresh.
+
+All sixteen rendering probes pass (lazy-table-summary.log), including repeated
+mixed CPU/GPU image reads, shared views, remaps and descriptor rewrites. Build:
+lazy-table-build.log; exact saved binary: shadps4-lazy-table. Native timing is in
+progress. This is a checkpoint, not a claim that the performance goal is met.
+
+The descriptor-copy candidate's opening IX run completed at 22.55 FPS.
+BuildImageTableSet's sampled rendering CPU share fell from 22.27% to 13.08%;
+GetImageTableSet fell from 34.14% to 26.78%. An additional 80-second moving arena
+run averaged only 17.37 FPS; the player remained alive with visible textured
+scenery. Thus the opening tunnel average overstates arena playability. A later
+80-second arena run restricted to CPUs 0–7,16–23 averaged 16.34 FPS. Enemy state,
+position and ammunition differed, so this is not an identical-scene A/B, but it
+provides no demonstrated benefit from forcing cache-core affinity. Default
+CPU placement remains the intended setting.
+
+The original runtime_image_loads probe now also uses 8,192 descriptors and two
+batches of 256 reads, swapping the two selected descriptors between batches.
+All 65,536 selected output words and the surrounding guards pass on the saved
+pre-copy-optimization executable, the current executable, and the current
+executable with submit_draw_interval=256 (large-table-summary.log). The existing
+WRITE_AFTER_PRESENT warning is still present in these runs; numerical PASS does
+not mean validation is completely clean. Native interval-256 timing is in
+progress, with the original interval-zero config backed up for restoration.

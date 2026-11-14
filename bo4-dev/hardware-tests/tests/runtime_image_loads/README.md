@@ -44,3 +44,8 @@ with a cropped view of only the first image, and finally the original full-size
 table twice. The cropped view requires a transfer from the cached full image;
 subsequent loads must still return both original values. All 512 words and guards
 are checked with synchronization validation enabled.
+
+The large-table case repeats 256 reads from an 8,192-entry table, swaps its two
+selected descriptors, and repeats the batch. Every output word and both guard
+regions are checked. It also exercises periodic command submission when the
+emulator's draw/dispatch submission interval is enabled.
