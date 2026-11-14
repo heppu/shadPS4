@@ -273,9 +273,55 @@ int main(void) {
     }
     st_emit_marker("CHECK", "layout_reads=4 cropped_sources=1 mismatches=%u", layout_mismatches);
     failures += layout_mismatches;
+    enum { LARGE_ENTRIES = 8192, LARGE_READS = 256, LARGE_WORDS = 8 + LARGE_READS * 128 + 8 };
+    GnmTexture* large_views = st_arena_alloc(&arena, LARGE_ENTRIES * sizeof(GnmTexture), 65536);
+    volatile uint32_t* large_output = st_arena_alloc(&arena, LARGE_WORDS * 4, 65536);
+    if (!large_views || !large_output)
+        return st_fail("reason=large_table_memory");
+    for (unsigned i = 0; i < LARGE_ENTRIES; ++i)
+        large_views[i] = mixed[i % 2];
+    GnmBuffer large_table = st_raw_buffer(large_views, LARGE_ENTRIES * sizeof(GnmTexture));
+    large_table.stride = sizeof(GnmTexture);
+    large_table.numrecords = LARGE_ENTRIES;
+    for (unsigned phase = 0; phase < 2; ++phase) {
+        large_views[0] = mixed[phase];
+        large_views[1] = mixed[1 - phase];
+        st_fill_words(large_output, LARGE_WORDS, 0xdeadbeef);
+        StDcb large_reads;
+        st_dcb_begin(&large_reads, &queue);
+        sceGnmDrawCmdSetCsShader(&large_reads.cmd, &shaders[1]);
+        sceGnmDrawCmdSetVsharpUserData(&large_reads.cmd, GNM_STAGE_CS, 0, &large_table);
+        for (unsigned pass = 0; pass < LARGE_READS; ++pass) {
+            GnmBuffer destination = st_raw_buffer(large_output + 8 + pass * 128, 128 * 4);
+            destination.stride = 4;
+            destination.numrecords = 128;
+            sceGnmDrawCmdSetVsharpUserData(&large_reads.cmd, GNM_STAGE_CS, 4, &destination);
+            sceGnmDrawCmdDispatchDirect(&large_reads.cmd, 2, 1, 1, 0);
+            st_dcb_barrier(&large_reads, 0);
+        }
+        if (!submit_and_wait(&large_reads))
+            return st_fail("reason=large_table_submit phase=%u", phase);
+        unsigned mismatches = 0;
+        for (unsigned i = 0; i < LARGE_WORDS; ++i) {
+            uint32_t expected = 0xdeadbeef;
+            if (i >= 8 && i < 8 + LARGE_READS * 128) {
+                unsigned image = ((i - 8) % 128 >= 64) ^ phase;
+                expected = image ? 0x3f000000 : 0x3f800000;
+            }
+            if (large_output[i] != expected) {
+                if (!mismatches)
+                    st_emit_marker("CHECK", "large phase=%u word=%u expected=%08x got=%08x",
+                                   phase, i, expected, large_output[i]);
+                ++mismatches;
+            }
+        }
+        st_emit_marker("CHECK", "large_entries=%u reads=%u phase=%u mismatches=%u",
+                       LARGE_ENTRIES, LARGE_READS, phase, mismatches);
+        failures += mismatches;
+    }
     if (failures)
         return st_fail("mismatches=%u", failures);
     st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=15 "
-                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 layout_reads=4 table_rewrite=1 guards=1");
+                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 layout_reads=4 large_entries=8192 large_reads=512 table_rewrite=1 guards=1");
     return 0;
 }
