@@ -1929,3 +1929,48 @@ A 48-actual-readback-wait diagnostic had no pending command in 41 cases; simple
 adjacent command batching therefore has limited demonstrated opportunity. A
 96-table diagnostic found 14 full refreshes with unchanged entries but changed
 image lifetime generation, supporting the narrower cache invalidation above.
+
+
+### Layered readback diagnosis and compute-copy candidate
+
+The valid retained-high-x3d run averages 23.6666 FPS with temporary GPU high
+policy and only the render thread pinned to CPU 7. The endpoint is alive at
+200 health with textured arena, weapon and HUD. Intervals are
+21.9/23.1/17.6/28.7/27.5/23.2. GPU policy was restored to auto after shutdown.
+This does not isolate affinity from power policy or scene variation.
+
+A GDB sample of 96 actual image downloads finds only 8x8x4096-layer, one-mip,
+1 MiB images: two downloads per frame over 48 frames. The candidate uses one
+compute dispatch per copy region for compatible 32-bit color arrays instead of
+the driver copy path. It preserves raw bits through an R32_UINT storage view,
+honors row/slice pitch, offsets and subresources, and falls back for unsupported
+formats, samples and oversized buffer ranges. Native performance is pending.
+
+Build and all 23 original rendering probes pass with core/sync validation. The
+expanded array_image_readback fixture passes seven cases on both the saved
+retained-entries control and candidate: integer/float linear and microtiled
+4096-layer arrays, partial workgroups with padded rows, packed RGBA8_UINT and
+guards, over two submissions. Neither array-probe log contains VUID or sync
+hazards. Fixture corrections for inclusive layers, pinned OpenGnm allocation,
+explicit pitch and RGBA byte extraction were checked against both builds.
+Physical-console validation remains unavailable. Native FPS remains pending.
+
+The exact packed HDR format observed natively is B10G11R11_UFLOAT_PACK32,
+32 bits, microtiled, single sample. The expanded original fixture now passes
+eight cases / four formats on both control and candidate, including packed
+10_11_11 FLOAT writes of 1.0 and 2.0. Both logs have no VUID/sync hazards.
+The native profile no longer lists the driver download hotspot above 1%.
+
+array-download-moving averages 17.2666 FPS under auto, but ends downed and is
+INVALID as a normal combat result. The valid array-high-x3d run averages
+28.9000 FPS with high GPU policy and render CPU 7, versus 23.6666 in the earlier
+retained-high-x3d run under those settings. Intervals are
+27.5/23.8/26.3/29.4/31.3/35.1; endpoint alive with 200 health, textured arena,
+weapon, particles and HUD. Scene variation prevents treating this as a precise
+controlled speedup. Consistent 30 FPS is not yet established. The temporary
+GPU policy was restored to auto after shutdown.
+
+A later 24-wait diagnostic finds 23 CPU-requested readbacks and one inline
+request, scattered across memory windows. These were sampled after the timed
+combat sequence; they may include death/cleanup and must not be assumed to
+represent the measured combat workload without an earlier live sample.
