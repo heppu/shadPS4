@@ -42,3 +42,8 @@ replaces the descriptor table's own mapping at the same virtual address. The
 replacement reverses the two descriptors while keeping the table buffer address
 and size unchanged. Both cases run without another SubmitDone; their outputs and
 guards are checked alongside the existing texture-data remap case.
+
+The alias-lifetime follow-up removes the initial alias after the first GPU read,
+then recreates it immediately before the physical-alias write phase. This checks
+transitions between one and multiple virtual mappings after a texture is already
+cached. The old early-alias ELF is retained separately in local validation output.
