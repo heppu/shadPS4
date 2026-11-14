@@ -2,7 +2,7 @@
 #include "shadtest_guest.h"
 #include "copy.h"
 
-enum { REGION_BYTES = 65536, WORDS = REGION_BYTES / 4, MAPPING_BYTES = 4 * REGION_BYTES };
+enum { ALIGNMENT = 65536, LIFETIMES = 44 };
 static bool submit_and_wait(StDcb* dcb) {
     const uint64_t address = (uint64_t)(uintptr_t)dcb->queue->label;
     const uint64_t value = ++dcb->queue->next_value;
@@ -39,53 +39,59 @@ int main(void) {
     regs.computenumthready = regs.computenumthreadz = 1;
     void* previous = NULL;
     off_t previous_physical = 0;
+    uint64_t previous_size = 0;
     StCase cases[3] = {{.name = "copies"}, {.name = "sources"}, {.name = "guards"}};
-    for (unsigned life = 0; life < 12; ++life) {
+    for (unsigned life = 0; life < LIFETIMES; ++life) {
+        const unsigned region_bytes = life < 12 ? ALIGNMENT
+            : (((life - 12) % 16) + 1) * 1024 * 1024;
+        const unsigned words_per_region = region_bytes / 4;
+        const uint64_t mapping_bytes = 4ull * region_bytes;
         off_t physical;
         void* mapping = NULL;
-        if (!st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), MAPPING_BYTES,
-                              REGION_BYTES, &physical) ||
-            !st_dmem_map(&mapping, MAPPING_BYTES, physical, false))
+        if (!st_dmem_alloc_in(0, (off_t)sceKernelGetDirectMemorySize(), mapping_bytes,
+                              ALIGNMENT, &physical) ||
+            !st_dmem_map(&mapping, mapping_bytes, physical, false))
             return st_fail("reason=mapping lifetime=%u", life);
         if (previous) {
-            if (mapping == previous || sceKernelMunmap(previous, MAPPING_BYTES) != 0 ||
-                sceKernelReleaseDirectMemory(previous_physical, MAPPING_BYTES) != 0)
+            if (mapping == previous || sceKernelMunmap(previous, previous_size) != 0 ||
+                sceKernelReleaseDirectMemory(previous_physical, previous_size) != 0)
                 return st_fail("reason=retirement lifetime=%u", life);
         }
         volatile uint32_t* words = mapping;
-        for (unsigned i = 0; i < 4 * WORDS; ++i)
-            words[i] = i < WORDS ? (0x12345678u ^ (life * 0x9e3779b9u) ^ i)
+        for (unsigned i = 0; i < 4 * words_per_region; ++i)
+            words[i] = i < words_per_region ? (0x12345678u ^ (life * 0x9e3779b9u) ^ i)
                                  : 0xded00000u ^ (life << 16) ^ i;
-        GnmBuffer source = st_raw_buffer(words, REGION_BYTES);
+        GnmBuffer source = st_raw_buffer(words, region_bytes);
         source.stride = 4;
-        source.numrecords = WORDS;
-        GnmBuffer destination = st_raw_buffer(words + 2 * WORDS, REGION_BYTES);
+        source.numrecords = words_per_region;
+        GnmBuffer destination = st_raw_buffer(words + 2 * words_per_region, region_bytes);
         destination.stride = 4;
-        destination.numrecords = WORDS;
+        destination.numrecords = words_per_region;
         StDcb dcb;
         st_dcb_begin(&dcb, &queue);
         sceGnmDrawCmdSetCsShader(&dcb.cmd, &regs);
         sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 0, &source);
         sceGnmDrawCmdSetVsharpUserData(&dcb.cmd, GNM_STAGE_CS, 4, &destination);
         st_dcb_barrier(&dcb, 0);
-        sceGnmDrawCmdDispatchDirect(&dcb.cmd, WORDS / 64, 1, 1, 0);
+        sceGnmDrawCmdDispatchDirect(&dcb.cmd, words_per_region / 64, 1, 1, 0);
         st_dcb_barrier(&dcb, 0);
         if (!submit_and_wait(&dcb))
             return st_fail("reason=submit lifetime=%u", life);
-        for (unsigned i = 0; i < 4 * WORDS; ++i) {
-            const unsigned region = i / WORDS;
-            const unsigned lane = i % WORDS;
+        for (unsigned i = 0; i < 4 * words_per_region; ++i) {
+            const unsigned region = i / words_per_region;
+            const unsigned lane = i % words_per_region;
             const uint32_t value = 0x12345678u ^ (life * 0x9e3779b9u) ^ lane;
             const uint32_t expected = region == 0 ? value : region == 2 ? value ^ 0x5a5a1234u
                                         : 0xded00000u ^ (life << 16) ^ i;
             st_case_expect(&cases[region == 0 ? 1 : region == 2 ? 0 : 2], "word",
-                           life * 4 * WORDS + i, expected, words[i]);
+                           life * 4 * words_per_region + i, expected, words[i]);
         }
         previous = mapping;
         previous_physical = physical;
+        previous_size = mapping_bytes;
     }
-    if (sceKernelMunmap(previous, MAPPING_BYTES) != 0 ||
-        sceKernelReleaseDirectMemory(previous_physical, MAPPING_BYTES) != 0)
+    if (sceKernelMunmap(previous, previous_size) != 0 ||
+        sceKernelReleaseDirectMemory(previous_physical, previous_size) != 0)
         return st_fail("reason=final_retirement");
-    return st_finish_cases(cases, 3, "lifetimes=12 copies=1 source_preserved=1 guards=1");
+    return st_finish_cases(cases, 3, "lifetimes=44 varied_sizes=16 copies=1 source_preserved=1 guards=1");
 }
