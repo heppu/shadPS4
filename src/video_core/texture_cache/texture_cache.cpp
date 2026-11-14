@@ -55,6 +55,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, liverpool{liverpool_},
       buffer_cache{buffer_cache_}, page_manager{page_manager_}, slot_images{MAX_IMAGES},
       image_update_versions{std::make_unique<std::atomic<u64>[]>(MAX_IMAGES)},
+      image_page_bits{std::make_unique<std::atomic<u64>[]>(NumImagePages / 64)},
       slot_image_views{MAX_IMAGE_VIEWS}, slot_samplers{MAX_SAMPLERS},
       blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
@@ -766,6 +767,11 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
 }
 
 ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
+    const u64 page = address >> Traits::PAGE_BITS;
+    if (page < NumImagePages &&
+        !(image_page_bits[page / 64].load(std::memory_order_acquire) & (1ULL << (page % 64)))) {
+        return {};
+    }
     const u64 generation = image_registration_generation.load(std::memory_order_acquire);
     const u64 index =
         ((address >> 6) ^ (address >> 16) ^ (address >> 32)) & (empty_image_addresses.size() - 1);
@@ -1071,6 +1077,9 @@ void TextureCache::RegisterImage(ImageId image_id) {
             .size = info.guest_size,
             .id = image_id,
         });
+        if (page < NumImagePages) {
+            image_page_bits[page / 64].fetch_or(1ULL << (page % 64), std::memory_order_release);
+        }
     });
     image_registration_generation.fetch_add(1, std::memory_order_release);
 }
@@ -1095,6 +1104,9 @@ void TextureCache::UnregisterImage(ImageId image_id) {
         ASSERT_MSG(vector_it != entries.end(), "Unregistering unregistered image in page={:#x}",
                    page << Traits::PAGE_BITS);
         entries.erase(vector_it);
+        if (entries.empty() && page < NumImagePages) {
+            image_page_bits[page / 64].fetch_and(~(1ULL << (page % 64)), std::memory_order_release);
+        }
     });
 }
 
