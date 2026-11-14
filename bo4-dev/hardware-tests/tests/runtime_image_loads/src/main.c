@@ -165,11 +165,13 @@ int main(void) {
                 failures += mismatches;
             }
     GnmTexture mixed[2] = {textures[0], textures[0]};
+    uint32_t* mixed_backing[2];
     for (unsigned t = 0; t < 2; ++t) {
         uint32_t* data = st_arena_alloc(&arena, backing_bytes[0], 65536);
         if (!data)
             return st_fail("reason=mixed_memory");
         st_fill_words(data, backing_bytes[0] / 4, t ? 0x3f000000 : 0x3e800000);
+        mixed_backing[t] = data;
         sceGnmTexSetBaseAddress(&mixed[t], data);
         descriptors[t] = mixed[t];
     }
@@ -283,9 +285,22 @@ int main(void) {
     GnmBuffer large_table = st_raw_buffer(large_views, LARGE_ENTRIES * sizeof(GnmTexture));
     large_table.stride = sizeof(GnmTexture);
     large_table.numrecords = LARGE_ENTRIES;
-    for (unsigned phase = 0; phase < 2; ++phase) {
-        large_views[0] = mixed[phase];
-        large_views[1] = mixed[1 - phase];
+    for (unsigned phase = 0; phase < 5; ++phase) {
+        if (phase < 2 || phase == 4) {
+            unsigned swap = phase == 1;
+            large_views[0] = mixed[swap];
+            large_views[1] = mixed[1 - swap];
+        }
+        if (phase == 2) {
+            for (unsigned i = 0; i < LARGE_ENTRIES; ++i)
+                large_views[i].minlod = 17;
+            st_fill_words(mixed_backing[0], backing_bytes[0] / 4, 0x3f200000);
+            st_fill_words(mixed_backing[1], backing_bytes[0] / 4, 0x3f600000);
+        }
+        if (phase == 3)
+            memset(&large_views[LARGE_ENTRIES - 1], 0, sizeof(GnmTexture));
+        if (phase == 4)
+            large_views[LARGE_ENTRIES - 1] = mixed[1];
         st_fill_words(large_output, LARGE_WORDS, 0xdeadbeef);
         StDcb large_reads;
         st_dcb_begin(&large_reads, &queue);
@@ -305,8 +320,9 @@ int main(void) {
         for (unsigned i = 0; i < LARGE_WORDS; ++i) {
             uint32_t expected = 0xdeadbeef;
             if (i >= 8 && i < 8 + LARGE_READS * 128) {
-                unsigned image = ((i - 8) % 128 >= 64) ^ phase;
-                expected = image ? 0x3f000000 : 0x3f800000;
+                unsigned image = ((i - 8) % 128 >= 64) ^ (phase != 0 && phase != 4);
+                expected = phase < 2 ? (image ? 0x3f000000 : 0x3f800000)
+                                    : (image ? 0x3f600000 : 0x3f200000);
             }
             if (large_output[i] != expected) {
                 if (!mismatches)
@@ -322,6 +338,6 @@ int main(void) {
     if (failures)
         return st_fail("mismatches=%u", failures);
     st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=15 "
-                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 layout_reads=4 large_entries=8192 large_reads=512 table_rewrite=1 guards=1");
+                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 layout_reads=4 large_entries=8192 large_reads=1280 table_rewrite=1 normalized_rewrite=1 entry_remove_restore=1 guards=1");
     return 0;
 }
