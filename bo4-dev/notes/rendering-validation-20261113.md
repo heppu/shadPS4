@@ -1653,3 +1653,38 @@ Build region-build.log passes. All sixteen original rendering probes pass
 (region-summary.log), including CPU writes through physical aliases, texture and
 descriptor remapping, raw buffer copies and subrect aliases. Performance remains
 unmeasured for this checkpoint. Native moving-arena timing follows.
+
+The region cache's fresh moving-arena sample averaged 15.42 FPS, rendering CPU
+46.53% and GPU busy 61.10%. Textured stone, flags, weapon and zombies are visible.
+This is not the earlier stationary workload. FindImage accounted for 2.89% of
+rendering CPU samples. The subsequent fast_shader_math option run averaged
+17.15 FPS, CPU 58.77%, GPU busy 47.80%; scenes differ and the incompatible shader
+cache was skipped, so this is preliminary rather than a controlled speedup.
+All sixteen fast-math rendering probes passed. Config-before-fastmath.json
+preserves the prior settings. Performance remains below the goal.
+
+### Retain normalized descriptor metadata (checkpoint)
+
+When a table's raw bytes change, normalized descriptors that remain identical
+retain their metadata. Actual additions, removals and replacements still reset
+the descriptor arrays, and the existing full image refresh remains active.
+The original large-table probe now checks five batches (1,280 reads, 163,840
+output words), including fractional-LOD changes with CPU pixel writes and an
+unselected entry's removal/restoration. Baseline, candidate and fast-math
+candidate pass this expanded probe.
+
+Build retain-descriptors-build.log passes. The first sixteen-probe suite had one
+physical_alias failure in runtime_image_updates; all other probes passed. Three
+interleaved repeats each of saved baseline and candidate then passed. This does
+not clear the previously documented timing-sensitive alias weakness; explicit
+physical-alias awareness is the next correctness/performance investigation.
+Evidence: retain-repeat-summary.log, retain-descriptors-summary.log.
+
+The post-timing readback caller audit collected 128 requests during live combat.
+Most were guest CPU writes; nineteen larger requests came from batch unmapping.
+Ten were GPU-parser sampler-table reads. A separate conditional write diagnostic
+found a 256 KiB GPU-written buffer ending 64 bytes before the sampled address,
+sharing its protected page. Its Python breakpoint callback logged nonmatching
+hits too; only the final conditional hit is evidence for that specific overlap.
+This suggests precise backing snapshots could avoid some parser readbacks, but
+no such bypass has been implemented.

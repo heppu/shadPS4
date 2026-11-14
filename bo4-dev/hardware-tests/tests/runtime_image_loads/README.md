@@ -49,3 +49,9 @@ The large-table case repeats 256 reads from an 8,192-entry table, swaps its two
 selected descriptors, and repeats the batch. Every output word and both guard
 regions are checked. It also exercises periodic command submission when the
 emulator's draw/dispatch submission interval is enabled.
+
+The large-table follow-up now runs five 256-read batches. After swapping the
+selected descriptors, it changes only fractional minimum LOD bits while CPU
+writes replace both textures' pixels. It then removes and restores an unselected
+entry and swaps selected entries back. All 163,840 output words and guards check
+that retaining unchanged descriptor metadata does not retain stale image data.
