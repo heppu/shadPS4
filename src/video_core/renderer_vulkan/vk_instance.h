@@ -254,6 +254,12 @@ public:
     }
 
     /// Returns true if the subgroup size can be set to match guest subgroup size
+    bool IsSubgroupSizeSupported(u32 size, vk::ShaderStageFlagBits stage) const {
+        return vk13_features.subgroupSizeControl && vk13_props.minSubgroupSize <= size &&
+               vk13_props.maxSubgroupSize >= size &&
+               bool(vk13_props.requiredSubgroupSizeStages & stage);
+    }
+
     bool IsSubgroupSize64Supported() const {
         return vk13_features.subgroupSizeControl && vk13_props.maxSubgroupSize >= 64;
     }
