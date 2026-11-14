@@ -5,6 +5,7 @@
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/debug.h"
+#include "common/div_ceil.h"
 #include "common/elf_info.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
@@ -39,6 +40,8 @@ MemoryManager::MemoryManager() {
         total_size += extra_fmem * 1_MB;
     }
     total_direct_size = total_size;
+    direct_mapping_counts.resize(Common::DivCeil(total_size, GUEST_PAGE_SIZE));
+    direct_alias_pages.resize(Common::DivCeil(direct_mapping_counts.size(), size_t{64}));
     dmem_map.clear();
     dmem_map.emplace(0, PhysicalMemoryArea{0, total_direct_size});
 
@@ -145,6 +148,69 @@ bool MemoryManager::SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<
         CopySparseMemory(address, dest.data() + i * sample_size, sample_size);
     }
     return true;
+}
+
+void MemoryManager::UpdateDirectMappingCounts(PAddr address, u64 size, bool add) {
+    if (size == 0) {
+        return;
+    }
+    const u64 first = address >> GUEST_PAGE_BITS;
+    const u64 end = Common::DivCeil(address + size, GUEST_PAGE_SIZE);
+    ASSERT(end <= direct_mapping_counts.size());
+    bool changed = false;
+    for (u64 page = first; page < end; ++page) {
+        auto& count = direct_mapping_counts[page];
+        const bool was_alias = count > 1;
+        if (add) {
+            ++count;
+        } else {
+            ASSERT(count != 0);
+            --count;
+        }
+        const bool is_alias = count > 1;
+        if (was_alias != is_alias) {
+            const u64 mask = 1ULL << (page % 64);
+            auto& word = direct_alias_pages[page / 64];
+            word = is_alias ? word | mask : word & ~mask;
+            changed = true;
+        }
+    }
+    if (changed) {
+        direct_alias_generation.fetch_add(1, std::memory_order_release);
+    }
+}
+
+std::optional<bool> MemoryManager::IsUniquelyMapped(VAddr virtual_addr, u64 size) {
+    std::shared_lock lk{mutex, std::try_to_lock};
+    if (!lk.owns_lock()) {
+        return std::nullopt;
+    }
+    if (size == 0 || !IsValidMapping(virtual_addr)) {
+        return false;
+    }
+    const auto& area = FindVMA(virtual_addr)->second;
+    if (area.type != VMAType::Direct || !area.Contains(virtual_addr, size)) {
+        return false;
+    }
+    bool unique = true;
+    u64 mapped_size = 0;
+    area.ForEachPhysArea(virtual_addr - area.base, size, [&](PAddr address, u64 bytes) {
+        mapped_size += bytes;
+        const u64 first = address >> GUEST_PAGE_BITS;
+        const u64 end = Common::DivCeil(address + bytes, GUEST_PAGE_SIZE);
+        if (end > direct_mapping_counts.size()) {
+            unique = false;
+            return;
+        }
+        for (u64 page = first; unique && page < end;) {
+            const u64 word_end = std::min(end, (page / 64 + 1) * 64);
+            const u64 high = word_end % 64 ? (1ULL << (word_end % 64)) - 1 : ~0ULL;
+            const u64 mask = (~0ULL << (page % 64)) & high;
+            unique = (direct_alias_pages[page / 64] & mask) == 0;
+            page = word_end;
+        }
+    });
+    return unique && mapped_size == size;
 }
 
 u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
@@ -737,6 +803,9 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
             // TRACK_ALLOC(mapped_addr, size, "VMEM");
         }
 
+        if (type == VMAType::Direct) {
+            UpdateDirectMappingCounts(phys_addr, size, true);
+        }
         lk2.unlock();
 
         // If this is not a reservation, then map to GPU and address space
@@ -1005,6 +1074,7 @@ u64 MemoryManager::UnmapBytesFromEntry(VAddr virtual_addr, VirtualMemoryArea vma
 
             // Create a new dmem area reflecting the pooled region
             if (vma_type == VMAType::Direct) {
+                UpdateDirectMappingCounts(phys_addr, size_in_dma, false);
                 const auto new_dmem_handle = CarvePhysArea(dmem_map, phys_addr, size_in_dma);
                 auto& new_dmem_area = new_dmem_handle->second;
                 new_dmem_area.dma_type = PhysicalMemoryType::Allocated;

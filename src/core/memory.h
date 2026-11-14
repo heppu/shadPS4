@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "common/enum.h"
 #include "common/shared_first_mutex.h"
 #include "common/singleton.h"
@@ -158,7 +161,7 @@ struct VirtualMemoryArea {
         return true;
     }
 
-    void ForEachPhysArea(u64 offset, u64 size, auto&& func) {
+    void ForEachPhysArea(u64 offset, u64 size, auto&& func) const {
         if (size == 0) {
             return;
         }
@@ -252,6 +255,12 @@ public:
     }
 
     u64 ClampRangeSize(VAddr virtual_addr, u64 size);
+
+    std::optional<bool> IsUniquelyMapped(VAddr virtual_addr, u64 size);
+
+    u64 DirectAliasGeneration() const {
+        return direct_alias_generation.load(std::memory_order_acquire);
+    }
 
     /// Samples readable direct-memory CPU backing without synchronizing GPU-owned ranges.
     bool SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<u8> dest, u64 count);
@@ -349,11 +358,16 @@ private:
 
     s32 UnmapMemoryImpl(VAddr virtual_addr, u64 size);
 
+    void UpdateDirectMappingCounts(PAddr address, u64 size, bool add);
+
 private:
     AddressSpace impl;
     PhysMap dmem_map;
     PhysMap fmem_map;
     VMAMap vma_map;
+    std::vector<u32> direct_mapping_counts;
+    std::vector<u64> direct_alias_pages;
+    std::atomic<u64> direct_alias_generation{1};
     Common::SharedFirstMutex mutex{};
     std::mutex unmap_mutex{};
     u64 total_direct_size{};

@@ -230,6 +230,9 @@ private:
         u64 content_size{};
         u64 verify_tick{};
         u32 verify_interval{};
+        u64 verified_generation{};
+        u64 alias_generation{};
+        bool has_alias{true};
         VideoCore::Image* image{};
         u64 image_generation{};
 
@@ -277,6 +280,7 @@ private:
         u64 checked_generation{};
         u64 checked_update_generation{};
         u64 checked_state_generation{};
+        u64 checked_alias_generation{};
         u64 validated_view_generation{};
         s32 current_set{-1};
         bool has_unresolved{};
