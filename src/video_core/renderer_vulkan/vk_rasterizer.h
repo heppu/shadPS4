@@ -86,6 +86,7 @@ public:
     void Finish();
     void OnSubmit();
     void OnFence();
+    void OnWriteData(VAddr address, u64 size);
     void InvalidateImageTables();
 
     PipelineCache& GetPipelineCache() {
