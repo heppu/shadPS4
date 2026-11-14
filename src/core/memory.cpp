@@ -188,29 +188,43 @@ std::optional<bool> MemoryManager::IsUniquelyMapped(VAddr virtual_addr, u64 size
     if (size == 0 || !IsValidMapping(virtual_addr)) {
         return false;
     }
-    const auto& area = FindVMA(virtual_addr)->second;
-    if (area.type != VMAType::Direct || !area.Contains(virtual_addr, size)) {
-        return false;
-    }
-    bool unique = true;
+    auto vma = FindVMA(virtual_addr);
     u64 mapped_size = 0;
-    area.ForEachPhysArea(virtual_addr - area.base, size, [&](PAddr address, u64 bytes) {
-        mapped_size += bytes;
-        const u64 first = address >> GUEST_PAGE_BITS;
-        const u64 end = Common::DivCeil(address + bytes, GUEST_PAGE_SIZE);
-        if (end > direct_mapping_counts.size()) {
-            unique = false;
-            return;
+    while (mapped_size < size) {
+        if (vma == vma_map.end()) {
+            return false;
         }
-        for (u64 page = first; unique && page < end;) {
-            const u64 word_end = std::min(end, (page / 64 + 1) * 64);
-            const u64 high = word_end % 64 ? (1ULL << (word_end % 64)) - 1 : ~0ULL;
-            const u64 mask = (~0ULL << (page % 64)) & high;
-            unique = (direct_alias_pages[page / 64] & mask) == 0;
-            page = word_end;
+        const auto& area = vma->second;
+        const VAddr address = virtual_addr + mapped_size;
+        if (area.type != VMAType::Direct || !area.Contains(address, 1)) {
+            return false;
         }
-    });
-    return unique && mapped_size == size;
+        const u64 offset = address - area.base;
+        const u64 chunk = std::min(size - mapped_size, area.size - offset);
+        const u64 expected = mapped_size + chunk;
+        bool unique = true;
+        area.ForEachPhysArea(offset, chunk, [&](PAddr physical_address, u64 bytes) {
+            mapped_size += bytes;
+            const u64 first = physical_address >> GUEST_PAGE_BITS;
+            const u64 end = Common::DivCeil(physical_address + bytes, GUEST_PAGE_SIZE);
+            if (end > direct_mapping_counts.size()) {
+                unique = false;
+                return;
+            }
+            for (u64 page = first; unique && page < end;) {
+                const u64 word_end = std::min(end, (page / 64 + 1) * 64);
+                const u64 high = word_end % 64 ? (1ULL << (word_end % 64)) - 1 : ~0ULL;
+                const u64 mask = (~0ULL << (page % 64)) & high;
+                unique = (direct_alias_pages[page / 64] & mask) == 0;
+                page = word_end;
+            }
+        });
+        if (!unique || mapped_size != expected) {
+            return false;
+        }
+        ++vma;
+    }
+    return true;
 }
 
 u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
