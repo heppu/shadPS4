@@ -1467,3 +1467,31 @@ attribute 17.47% to BuildImageTableSet versus 29.21%, and GetImageTableSet inclu
 28.71% versus 37.61%. These are sampled proportions, not exact frame-time savings.
 The result remains below the playable-performance goal. Further GPU profiling
 and moving combat validation are required.
+
+### Direct image-read table layout revisions (checkpoint)
+
+Registered images now expose their atomic update revision to layout transitions.
+Direct read/depth tables refresh affected entries when a read-only image leaves
+its sampling layout, and unchanged immutable tables avoid a redundant rebuild.
+Mutable GPU images still refresh on use. Content-keyed sampled tables retain
+conservative full refreshes on layout changes: applying the shortcut there
+exposed the existing physical-alias write-detection weakness (two failures in
+four candidate runs, versus three passing saved-control runs). That broader
+shortcut is not included.
+
+All sixteen probes pass after narrowing the change (states-safe-summary.log).
+The original runtime_image_loads homebrew adds full/cropped/full/full reads with
+numeric output and guard verification, passing on the old and new executables.
+The saved executable is shadps4-states-safe. Gameplay performance for this exact
+checkpoint has not yet been measured; the playable-performance goal remains open.
+
+A separate O3/ThinLTO build with CPU Tracy disabled measured 16.20 FPS over the
+same stationary IX workload, ending downed. This does not demonstrate an
+improvement over the normal build; the normal build configuration is retained.
+A current bright IX RenderDoc capture was saved, but replay exceeded the 6,000
+MiB GTT guard. Older replays are not evidence for current GPU frame time.
+
+A diagnostic found an earlier 6 GiB advertised-heap run reporting about 7.56 GiB
+of device usage against a 3.87 GiB critical collection threshold. A larger
+advertised-budget comparison is in progress, with aggregate memory guards
+unchanged. No claim of playable performance is made from these diagnostics.

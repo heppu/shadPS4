@@ -222,9 +222,60 @@ int main(void) {
     }
     st_emit_marker("CHECK", "mixed_repeated_reads=4 mismatches=%u", mixed_mismatches);
     failures += mixed_mismatches;
+    GnmTexture* full_views = st_arena_alloc(&arena, 2 * sizeof(GnmTexture), 65536);
+    GnmTexture* crop_views = st_arena_alloc(&arena, 2 * sizeof(GnmTexture), 65536);
+    if (!full_views || !crop_views)
+        return st_fail("reason=layout_descriptors");
+    for (unsigned t = 0; t < 2; ++t) {
+        uint32_t* data = st_arena_alloc(&arena, backing_bytes[0], 65536);
+        if (!data)
+            return st_fail("reason=layout_memory");
+        st_fill_words(data, backing_bytes[0] / 4, t ? 0x3f000000 : 0x3e800000);
+        full_views[t] = textures[0];
+        sceGnmTexSetBaseAddress(&full_views[t], data);
+        crop_views[t] = full_views[t];
+    }
+    sceGnmTexSetWidth(&crop_views[0], 32);
+    sceGnmTexSetHeight(&crop_views[0], 32);
+    volatile uint32_t* layout_output = st_arena_alloc(&arena, (8 + 4 * 128 + 8) * 4, 65536);
+    if (!layout_output)
+        return st_fail("reason=layout_output");
+    st_fill_words(layout_output, 8 + 4 * 128 + 8, 0xdeadbeef);
+    StDcb layout_reads;
+    st_dcb_begin(&layout_reads, &queue);
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        GnmBuffer table = st_raw_buffer(pass == 1 ? crop_views : full_views,
+                                        2 * sizeof(GnmTexture));
+        table.stride = sizeof(GnmTexture);
+        table.numrecords = 2;
+        GnmBuffer destination = st_raw_buffer(layout_output + 8 + pass * 128, 128 * 4);
+        destination.stride = 4;
+        destination.numrecords = 128;
+        sceGnmDrawCmdSetCsShader(&layout_reads.cmd, &shaders[1]);
+        sceGnmDrawCmdSetVsharpUserData(&layout_reads.cmd, GNM_STAGE_CS, 0, &table);
+        sceGnmDrawCmdSetVsharpUserData(&layout_reads.cmd, GNM_STAGE_CS, 4, &destination);
+        sceGnmDrawCmdDispatchDirect(&layout_reads.cmd, 2, 1, 1, 0);
+        st_dcb_barrier(&layout_reads, 0);
+    }
+    if (!submit_and_wait(&layout_reads))
+        return st_fail("reason=layout_submit");
+    unsigned layout_mismatches = 0;
+    for (unsigned i = 0; i < 8 + 4 * 128 + 8; ++i) {
+        uint32_t expected = 0xdeadbeef;
+        if (i >= 8 && i < 8 + 4 * 128)
+            expected = (i - 8) % 128 >= 64 ? 0x3f000000 : 0x3e800000;
+        if (layout_output[i] != expected) {
+            if (!layout_mismatches)
+                st_emit_marker("CHECK", "layout word=%u expected=%08x got=%08x", i,
+                               expected, layout_output[i]);
+            ++layout_mismatches;
+        }
+    }
+    st_emit_marker("CHECK", "layout_reads=4 cropped_sources=1 mismatches=%u", layout_mismatches);
+    failures += layout_mismatches;
     if (failures)
         return st_fail("mismatches=%u", failures);
     st_emit_marker("PASS", "numeric_types=3 dimensions=3 static_controls=9 runtime_cases=15 "
-                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 table_rewrite=1 guards=1");
+                           "gpu_updates=3 cpu_updates=3 mixed_reads=4 layout_reads=4 table_rewrite=1 guards=1");
     return 0;
 }
