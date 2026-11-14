@@ -1608,3 +1608,29 @@ The interval-256 experiment regressed to 2.73 FPS, with rendering CPU 24.43% and
 GPU busy 94.95%. It is rejected and the prior interval-zero configuration was
 restored. The profile and post-timing wait diagnostic are retained under
 submit256-arena; periodic submission is not a recommended setting.
+
+The page-occupancy build averaged 18.63 FPS in the opening run.
+FindImageForBuffer fell below the profile's 1% reporting threshold, but this
+does not establish playable moving combat.
+
+### Read-only DMA fragment early-depth checks (checkpoint)
+
+DMA page-table/fault bookkeeping introduces storage writes even in otherwise
+read-only guest fragment shaders. Such instrumentation can inhibit implicit
+early depth rejection. Emit explicit EarlyFragmentTests only when the guest
+requests early-capable depth order, depth is read-only, stencil is disabled,
+and neither shader side effects nor discard/coverage/depth/sample/helper
+semantics require later execution. Forced execution on hierarchical failure or
+no-op draws is excluded. Only emulator-owned page-table and fault buffers are
+exempted from the guest storage-write check. Shader cache versions are bumped.
+
+The new original early_depth_dma OpenOrbis probe verifies seven cases: visible
+and occluded read-only DMA, visible and occluded guest writes, depth-write,
+discard and explicit late-depth controls. Baseline and candidate both pass;
+all sixteen existing rendering probes also pass (early-depth-final-summary.log).
+Generated SPIR-V confirms EarlyFragmentTests activates only for the eligible
+read-only variant; guest-write, discard, depth-write and late-depth controls
+retain late execution. No physical-console result is claimed. Build:
+early-depth-final-build.log; exact binary: shadps4-early-depth-final. Native
+performance and visual checks are pending, with the previous shader cache saved
+in cache-before-early-depth. The performance goal remains open.
