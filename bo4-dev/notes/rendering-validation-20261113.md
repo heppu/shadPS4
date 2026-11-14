@@ -1763,3 +1763,20 @@ FPS improvement over alias-spans-moving, despite lower CPU utilization. Live
 screenshots show arena materials and the moving player's weapon/muzzle flash.
 CPU profile still attributes 37.06% to image tables, 23.97% to table building and
 12.44% to full backing hashes. Scratch-vector resizing accounts for 9.13% overall.
+
+
+### Hash direct backing without scratch copies
+
+MemoryManager now streams all covered physical spans into XXH3 under a try-held
+mapping lock. Unreadable/non-direct/incomplete mappings return no hash and retain
+the existing retry behavior. TableImageFullHash no longer grows/zeroes and copies
+an image-sized scratch vector. Cross-VMA hashing preserves the same ordered byte
+stream as the former complete copy.
+
+Build and all 18 original probes pass (direct-hash-summary.log). Native moving
+combat averages 17.20 FPS, render CPU 54.85%, GPU busy 52.30%. Full hashing falls
+from 12.44% to 2.28% of rendering CPU samples; table building falls 23.97% to
+15.27%. Different combat scenes prevent treating the FPS delta as a controlled
+speedup. The endpoint shows textured arena geometry and a live player; the
+previously observed dark weapon silhouette is still present in shadow. Performance
+and exhaustive visual validation remain unfinished.
