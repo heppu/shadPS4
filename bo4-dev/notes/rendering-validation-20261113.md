@@ -1744,3 +1744,22 @@ all three sample phases with untouched deadbeef output. Candidate passes all fou
 cases with Vulkan core/synchronization validation (sampler-snapshot-probe.log).
 All 16 existing rendering probes pass (sampler-snapshot-summary.log); build passes.
 No physical-console result or native FPS improvement is claimed for this fix yet.
+
+
+### Retain clean image table entries across epochs
+
+Table refresh now retains unchanged unique read-only textures across frame epochs
+and ignored fractional-LOD/metadata edits. Reused entries keep both the image and
+table view alive. Content shared through another virtual descriptor address stays
+dynamic, as do physical aliases, targets and images with changed update revisions.
+Mapping and image-registration generation invalidation remains conservative.
+
+All 18 original probes pass (table-reuse-summary.log), including expanded large
+image tables, split mappings, runtime updates and shared-page samplers. Existing
+WRITE_AFTER_PRESENT presentation validation warnings recur in two probe runs;
+no new texture-specific validation error was found. Native moving combat averages
+14.10 FPS, render CPU 55.58%, GPU busy 51.28% over 60 seconds. This is no demonstrated
+FPS improvement over alias-spans-moving, despite lower CPU utilization. Live
+screenshots show arena materials and the moving player's weapon/muzzle flash.
+CPU profile still attributes 37.06% to image tables, 23.97% to table building and
+12.44% to full backing hashes. Scratch-vector resizing accounts for 9.13% overall.
