@@ -249,8 +249,17 @@ GraphicsPipeline::GraphicsPipeline(
     const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci = {
         .requiredSubgroupSize = 64,
     };
+    const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_32_ci = {
+        .requiredSubgroupSize = 32,
+    };
+    const auto* fragment_info = infos[u32(Shader::SwStage::Fragment)];
     for (auto& stage : shader_stages) {
         stage.pNext = instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr;
+        if (stage.stage == vk::ShaderStageFlagBits::eFragment && fragment_info &&
+            !fragment_info->requires_wave64 &&
+            instance.IsSubgroupSizeSupported(32, vk::ShaderStageFlagBits::eFragment)) {
+            stage.pNext = &subgroup_size_32_ci;
+        }
     }
 
     const auto depth_format =
