@@ -1530,3 +1530,21 @@ After native timing, a 128-call GPU-drain audit found 101 CPU-requested buffer
 readbacks, nine command-processor buffer reads, and nine each EOS/EOP image
 readback drains. A later readback-address sample was taken during the transition
 to the after-action report, so it must not be treated as a combat workload.
+
+### Empty image lookup cache (checkpoint)
+
+A 256-entry address cache remembers only lookups that found no overlapping image.
+Every image registration advances its generation. Existing CPU-dirty images are
+never recorded as absent, and positive lookups retain the existing validation.
+The cache is used by the GPU command thread's buffer binding paths.
+
+The original image_raw_buffer_copy homebrew now checks a CPU rewrite followed
+by a GPU write to the same existing image, with small buffer copies and guards.
+It passes before the change with linear readback both disabled and enabled;
+all sixteen probes pass after the change (empty-summary.log). Build:
+empty-build.log; saved binary: shadps4-empty. Native timing is in progress.
+
+A separate 4 MiB readback-window experiment measured 18.45 FPS, versus 19.58 for
+the preceding 512 KiB run, on the variable stationary IX workload. No improvement
+was demonstrated; the original 512 KiB window is restored. Its saved binary and
+profile are shadps4-readback4 and readback4-arena respectively.
