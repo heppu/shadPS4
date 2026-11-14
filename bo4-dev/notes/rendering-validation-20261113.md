@@ -2008,3 +2008,26 @@ establish a performance gain. The emulator change is removed; its patch and
 exact binary remain in out/performance for diagnostics. The expanded original
 homebrew is retained. The normal retained emulator remains the layered-copy
 implementation. Workload-guided compiler optimization is the next experiment.
+
+### Compiler-training and launch tooling checkpoint
+
+History consolidation now uses the verified parent of the first tooling commit,
+4788f0b108a6faaae5105f8ac88ef8e1935e2b22. f4b2ac4c is an earlier project FIX, not
+the upstream base. The tooling consolidation archived the published tip, verified
+an identical final tree and removed all pending fixups before pushing.
+
+A separate Clang 23.1.4 native-CPU training build succeeds. Its first continuous
+instrumentation variant passes all 23 rendering probes, but llvm-profdata rejects
+the resulting profile as truncated. A tiny indirect-call reproducer also fails;
+-dis ... value-profiling experiments show that -mllvm -disable-vp fixes that
+format case, but would lose useful indirect-call data. The replacement uses
+LLVM's explicit profile-write API in a training-only checkpoint thread. Its
+indirect-call diagnostic produces a valid seven-function profile. The full
+replacement training build succeeds; native gameplay collection is in progress.
+
+The new play-fast helper restores GPU policy after a bounded lifecycle check and
+a native game shutdown. It selects CPU 7 automatically on this host and pins the
+render thread after startup. An initial headless launch used Wayland while the
+automation used X11; it stayed at the title screen and supplies NO combat profile.
+The headless wrapper now forwards X11 explicitly and that training run is being
+repeated. Optimized-build performance remains unmeasured.
