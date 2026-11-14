@@ -636,9 +636,26 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     ASSERT(info.guest_address != 0);
 
-    SmallVector<ImageId, 8> image_ids;
-    ForEachImageInRegion(info.guest_address, info.guest_size,
-                         [&](ImageId image_id, Image& image) { image_ids.push_back(image_id); });
+    const u64 registration_generation =
+        image_registration_generation.load(std::memory_order_acquire);
+    const u64 removal_generation = image_generation.load(std::memory_order_acquire);
+    const u64 region_index =
+        ((info.guest_address >> 8) ^ (info.guest_address >> 20) ^ info.guest_size) &
+        (image_regions.size() - 1);
+    auto& region = image_regions[region_index];
+    if (region.address != info.guest_address || region.size != info.guest_size ||
+        region.registration_generation != registration_generation ||
+        region.removal_generation != removal_generation) {
+        region.images.clear();
+        ForEachImageInRegion(
+            info.guest_address, info.guest_size,
+            [&](ImageId image_id, Image& image) { region.images.push_back(image_id); });
+        region.address = info.guest_address;
+        region.size = info.guest_size;
+        region.registration_generation = registration_generation;
+        region.removal_generation = removal_generation;
+    }
+    const auto image_ids = region.images;
 
     ImageId image_id{};
 

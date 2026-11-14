@@ -537,6 +537,14 @@ private:
         u64 generation{};
     };
     std::array<EmptyImageAddress, 256> empty_image_addresses{};
+    struct ImageRegion {
+        VAddr address{};
+        u64 size{};
+        u64 registration_generation{};
+        u64 removal_generation{};
+        SmallVector<ImageId, 8> images;
+    };
+    std::array<ImageRegion, 512> image_regions{};
     std::atomic<u64> update_generation = 0;
     std::mutex download_images_mutex;
     absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
