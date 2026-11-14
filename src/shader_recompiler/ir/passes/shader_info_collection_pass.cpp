@@ -258,10 +258,12 @@ void CollectShaderInfoPass(IR::Program& program, const Profile& profile) {
         info.uses_group_ballot || info.loads.GetAny(IR::Attribute::SubgroupLtMask) ||
         info.has_storage_images || info.shared_guest_segment.used_types != IR::Type::Void ||
         info.shared_scratch_segment.used_types != IR::Type::Void ||
-        std::ranges::any_of(info.buffers, [](const auto& buffer) { return buffer.is_written; });
+        std::ranges::any_of(info.buffers, [](const auto& buffer) { return buffer.is_written; }) ||
+        std::ranges::any_of(info.images, [](const auto& image) { return image.is_written; });
     for (const auto* block : program.post_order_blocks) {
         for (const auto& inst : block->Instructions()) {
-            info.requires_wave64 |= inst.GetOpcode() == IR::Opcode::SubgroupBarrier;
+            info.requires_wave64 |= inst.GetOpcode() == IR::Opcode::SubgroupBarrier ||
+                                    inst.GetOpcode() == IR::Opcode::GroupAny;
         }
     }
 
