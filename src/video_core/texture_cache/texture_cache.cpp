@@ -95,17 +95,23 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
 
 TextureCache::~TextureCache() = default;
 
-void TextureCache::ProcessDownloadImages() {
+void TextureCache::ProcessDownloadImages(VAddr address, u64 size) {
     std::unique_lock lk{download_images_mutex};
-    if (download_images.empty()) {
-        return;
-    }
-    for (const ImageId image_id : download_images) {
+    bool downloaded = false;
+    for (auto it = download_images.begin(); it != download_images.end();) {
+        const ImageId image_id = *it;
+        if (size != 0 && !slot_images[image_id].Overlaps(address, size)) {
+            ++it;
+            continue;
+        }
         DownloadImageMemory(image_id);
+        download_images.erase(it++);
+        downloaded = true;
     }
-    download_images.clear();
-    scheduler.Finish();
-    scheduler.PopPendingOperations();
+    if (downloaded) {
+        scheduler.Finish();
+        scheduler.PopPendingOperations();
+    }
 }
 
 void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags flags) {
