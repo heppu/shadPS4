@@ -125,7 +125,7 @@ private:
                      Shader::PushData& push_data);
     void BindTextures(const Shader::Info& stage, Shader::Backend::Bindings& binding);
     vk::Sampler ResolveSampler(AmdGpu::Sampler ssharp, bool is_depth);
-    void ResolveSamplerTable(const Shader::SamplerResource& sampler, const AmdGpu::Buffer& table,
+    void ResolveSamplerTable(const Shader::SamplerResource& sampler, std::span<const u8> table,
                              const Shader::Info& stage);
     vk::DescriptorSet GetSamplerTableSet(const Shader::SamplerResource& sampler,
                                          const Shader::Info& stage);
@@ -205,6 +205,12 @@ private:
         vk::DescriptorSet set;
         u64 touch_tick;
     };
+    struct SamplerTableSnapshot {
+        VAddr address{};
+        std::vector<u8> data;
+    };
+    std::vector<SamplerTableSnapshot> sampler_table_snapshots;
+    size_t sampler_snapshot_index{};
     std::vector<SamplerTableSet> sampler_table_sets;
     std::vector<vk::DescriptorImageInfo> sampler_table_infos;
     boost::container::small_vector<vk::DescriptorSet, 4> table_sets;
