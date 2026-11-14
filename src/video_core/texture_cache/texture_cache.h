@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <deque>
 #include <memory>
@@ -528,6 +529,12 @@ private:
     std::recursive_mutex registry_mutex;
     u64 sampler_generation = 0;
     std::atomic<u64> image_generation = 0;
+    std::atomic<u64> image_registration_generation{1};
+    struct EmptyImageAddress {
+        VAddr address{};
+        u64 generation{};
+    };
+    std::array<EmptyImageAddress, 256> empty_image_addresses{};
     std::atomic<u64> update_generation = 0;
     std::mutex download_images_mutex;
     absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
