@@ -14,7 +14,7 @@ try:
   st=(task/'stat').read_text().rsplit(')',1)[1].split()
   gpu=Path('/sys/class/drm/card1/device/gpu_busy_percent')
   policy=gpu.with_name('power_dpm_force_performance_level')
-  rows.append({'seconds':t-start,'unix_time':time.time(),'frame':frame,'render_cpu_seconds':(int(st[11])+int(st[12]))/hz,'render_cpu':int(st[36]),'gpu_busy_percent':int(gpu.read_text()) if gpu.exists() else None,'gpu_power_policy':policy.read_text().strip() if policy.exists() else None})
+  rows.append({'seconds':t-start,'unix_time':time.time(),'frame':frame,'render_cpu_seconds':(int(st[11])+int(st[12]))/hz,'render_cpu':int(st[36]),'gpu_busy_percent':int(gpu.read_text()) if gpu.exists() else None,'gpu_power_policy':policy.read_text().strip() if policy.exists() else None,'gpu_clock':next((line.strip() for line in gpu.with_name('pp_dpm_sclk').read_text().splitlines() if '*' in line),None) if gpu.with_name('pp_dpm_sclk').exists() else None})
   if i and i%10==0:
    fps=(frame-rows[-11]['frame'])/(rows[-1]['seconds']-rows[-11]['seconds'])
    print('elapsed',i,'last10_fps',round(fps,2),'cpu',st[36],flush=True)
