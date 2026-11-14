@@ -631,31 +631,33 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
     return new_image_id;
 }
 
+SmallVector<ImageId, 8> TextureCache::FindImagesInRegion(VAddr address, size_t size) {
+    const u64 registration_generation =
+        image_registration_generation.load(std::memory_order_acquire);
+    const u64 removal_generation = image_generation.load(std::memory_order_acquire);
+    const u64 region_index = ((address >> 8) ^ (address >> 20) ^ size) & (image_regions.size() - 1);
+    auto& region = image_regions[region_index];
+    if (region.address != address || region.size != size ||
+        region.registration_generation != registration_generation ||
+        region.removal_generation != removal_generation) {
+        region.images.clear();
+        ForEachImageInRegion(address, size, [&](ImageId image_id, Image& image) {
+            region.images.push_back(image_id);
+        });
+        region.address = address;
+        region.size = size;
+        region.registration_generation = registration_generation;
+        region.removal_generation = removal_generation;
+    }
+    return region.images;
+}
+
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
 
     ASSERT(info.guest_address != 0);
 
-    const u64 registration_generation =
-        image_registration_generation.load(std::memory_order_acquire);
-    const u64 removal_generation = image_generation.load(std::memory_order_acquire);
-    const u64 region_index =
-        ((info.guest_address >> 8) ^ (info.guest_address >> 20) ^ info.guest_size) &
-        (image_regions.size() - 1);
-    auto& region = image_regions[region_index];
-    if (region.address != info.guest_address || region.size != info.guest_size ||
-        region.registration_generation != registration_generation ||
-        region.removal_generation != removal_generation) {
-        region.images.clear();
-        ForEachImageInRegion(
-            info.guest_address, info.guest_size,
-            [&](ImageId image_id, Image& image) { region.images.push_back(image_id); });
-        region.address = info.guest_address;
-        region.size = info.guest_size;
-        region.registration_generation = registration_generation;
-        region.removal_generation = removal_generation;
-    }
-    const auto image_ids = region.images;
+    const auto image_ids = FindImagesInRegion(info.guest_address, info.guest_size);
 
     ImageId image_id{};
 
@@ -801,11 +803,12 @@ ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
     ImageId exact{};
     u32 candidates = 0;
     u32 exact_matches = 0;
-    ForEachImageInRegion(address, 1, [&](ImageId image_id, Image& image) {
+    for (const ImageId image_id : FindImagesInRegion(address, 1)) {
+        Image& image = slot_images[image_id];
         has_image = true;
         if (!image.HasGpuValidData() || address < image.info.guest_address ||
             address - image.info.guest_address >= image.info.guest_size) {
-            return;
+            continue;
         }
         candidate = image_id;
         ++candidates;
@@ -813,7 +816,7 @@ ImageId TextureCache::FindImageForBuffer(VAddr address, size_t size) {
             exact = image_id;
             ++exact_matches;
         }
-    });
+    }
     if (!has_image) {
         empty = {address, generation};
     }
@@ -946,16 +949,17 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
         return;
     }
     ImageId stencil_id{};
-    ForEachImageInRegion(
-        depth_info.stencil_addr, depth_info.stencil_size, [&](ImageId image_id, Image& image) {
-            if (image.info.guest_address != depth_info.stencil_addr) {
-                return;
-            }
-            if (image.info.pixel_format == vk::Format::eUndefined ||
-                Vulkan::LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format)) {
-                stencil_id = image_id;
-            }
-        });
+    for (const ImageId image_id :
+         FindImagesInRegion(depth_info.stencil_addr, depth_info.stencil_size)) {
+        Image& image = slot_images[image_id];
+        if (image.info.guest_address != depth_info.stencil_addr) {
+            continue;
+        }
+        if (image.info.pixel_format == vk::Format::eUndefined ||
+            Vulkan::LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format)) {
+            stencil_id = image_id;
+        }
+    }
     if (!stencil_id) {
         ImageInfo info{};
         info.guest_address = depth_info.stencil_addr;
