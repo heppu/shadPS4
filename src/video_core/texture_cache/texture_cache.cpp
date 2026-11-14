@@ -1046,6 +1046,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
     image.cache_id = image_id;
+    image.update_version_counter = &image_update_versions[image_id.index];
     image_update_versions[image_id.index].fetch_add(1, std::memory_order_release);
     image.memory_usage_counter = &total_used_memory;
     total_used_memory += Common::AlignUp(image.SizeBytes(), 1024);
@@ -1067,6 +1068,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");
     image.flags &= ~ImageFlagBits::Registered;
+    image.update_version_counter = nullptr;
     image_update_versions[image_id.index].fetch_add(1, std::memory_order_release);
     image_generation.fetch_add(1, std::memory_order_release);
     image.memory_usage_counter = nullptr;
