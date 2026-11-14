@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0, r32ui) uniform readonly uimage2DArray source_image;
+layout(set = 0, binding = 1, std430) writeonly buffer Destination {
+    uint words[];
+};
+layout(push_constant) uniform CopyParameters {
+    uint width;
+    uint height;
+    uint layers;
+    uint row_pitch;
+    uint slice_pitch;
+    uint word_offset;
+    uint source_x;
+    uint source_y;
+} copy;
+
+void main() {
+    uvec3 position = gl_GlobalInvocationID;
+    if (any(greaterThanEqual(position, uvec3(copy.width, copy.height, copy.layers)))) {
+        return;
+    }
+    uint offset = copy.word_offset + position.z * copy.slice_pitch +
+                  position.y * copy.row_pitch + position.x;
+    ivec3 source = ivec3(position + uvec3(copy.source_x, copy.source_y, 0));
+    words[offset] = imageLoad(source_image, source).x;
+}
