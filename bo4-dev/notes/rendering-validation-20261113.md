@@ -2106,3 +2106,14 @@ headless preset has exercised GPU policy, CPU placement, input routing and
 policy restoration in native runs. The native-CPU O2 PGO build is retained;
 the aggressive O3/ThinLTO build is rejected. All 23 rendering probes pass on
 the retained compiler build, with the separately documented presentation warning.
+
+
+The longer run completes all 180 seconds at 26.3944 FPS, but remains INVALID as
+an uninterrupted active-play average because of the observed downed interval.
+Its ten-second intervals span 20.7 to 34.2 FPS. It ends alive after revival with
+textured scenery and HUD; there is no observed emulator crash. It is explicitly
+stopped after collection, and the temporary GPU policy is restored. The tested
+performance improvement is material relative to the reported 8 FPS, but this
+is not evidence for a locked 30 FPS across all scenes or maps. The clean
+pgo-running minute and this longer mixed-state run are both retained, including
+all intermediate captures, rather than reporting only the favorable endpoint.
