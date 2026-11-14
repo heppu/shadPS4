@@ -1860,3 +1860,18 @@ power-mode experiments are temporary; no voltage or overclock settings changed.
 
 Performance remains below the target; scene differences prevent treating these
 numbers as controlled speedup ratios. Exact candidate: shadps4-dynamic-list.
+
+
+### Plain interval union fast path
+
+Plain Interval additions now merge the union directly and return immediately for
+an already-covered range. Typed intervals retain the original payload replacement
+and subrange logic. This avoids transient splitting, insertion and coalescing in
+frequent buffer-access tracking. Build and all 20 original probes pass.
+
+interval-union-moving averages 20.2333 FPS in 60 seconds under confirmed auto GPU
+policy, CPU 53.37%, GPU busy 53.87%; intervals 18.0/15.4/20.1/20.1/22.0/25.8.
+Endpoint is live gameplay with textured arena and weapon. IntervalList<Interval>
+Add CPU share is 4.41% (previous dynamic-list-repeat 6.13%); differing scenes and
+power modes limit comparison. GPU policy stayed auto through probe and native
+runs after the second restoration. Exact binary: shadps4-interval-union.
