@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <boost/container/small_vector.hpp>
+#include <xxhash.h>
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/debug.h"
@@ -148,6 +149,40 @@ bool MemoryManager::SampleDirectBacking(VAddr virtual_addr, u64 size, std::span<
         CopySparseMemory(address, dest.data() + i * sample_size, sample_size);
     }
     return true;
+}
+
+std::optional<u64> MemoryManager::HashDirectBacking(VAddr virtual_addr, u64 size) {
+    std::shared_lock lk{mutex, std::try_to_lock};
+    if (!lk.owns_lock() || size == 0 || !IsValidMapping(virtual_addr) ||
+        !IsValidMapping(virtual_addr + size - 1)) {
+        return std::nullopt;
+    }
+    const std::unique_ptr<XXH3_state_t, decltype(&XXH3_freeState)> state{XXH3_createState(),
+                                                                         &XXH3_freeState};
+    if (!state) {
+        return std::nullopt;
+    }
+    XXH3_64bits_reset(state.get());
+    auto vma = FindVMA(virtual_addr);
+    u64 consumed = 0;
+    while (consumed < size) {
+        const auto& area = vma->second;
+        if (area.type != VMAType::Direct || False(area.prot & MemoryProt::CpuRead)) {
+            return std::nullopt;
+        }
+        const u64 offset = virtual_addr + consumed - area.base;
+        const u64 chunk_size = std::min(size - consumed, area.size - offset);
+        const u64 expected = consumed + chunk_size;
+        area.ForEachPhysArea(offset, chunk_size, [&](PAddr address, u64 bytes) {
+            XXH3_64bits_update(state.get(), impl.BackingBase() + address, bytes);
+            consumed += bytes;
+        });
+        if (consumed != expected) {
+            return std::nullopt;
+        }
+        ++vma;
+    }
+    return XXH3_64bits_digest(state.get());
 }
 
 void MemoryManager::UpdateDirectMappingCounts(PAddr address, u64 size, bool add) {

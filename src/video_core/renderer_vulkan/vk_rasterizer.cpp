@@ -1295,13 +1295,12 @@ u64 Rasterizer::TableImageFullHash(const AmdGpu::Image& tsharp, AmdGpu::ImageTyp
     if (count < 2) {
         return 0;
     }
-    table_verify_data.resize(desc.info.guest_size);
-    if (!memory->SampleDirectBacking(desc.info.guest_address, desc.info.guest_size,
-                                     table_verify_data, 2)) {
+    const auto hash = memory->HashDirectBacking(desc.info.guest_address, desc.info.guest_size);
+    if (!hash) {
         return 0;
     }
-    table_verify_bytes += table_verify_data.size();
-    return XXH3_64bits(table_verify_data.data(), table_verify_data.size()) | 1;
+    table_verify_bytes += desc.info.guest_size;
+    return *hash | 1;
 }
 
 vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 key,
