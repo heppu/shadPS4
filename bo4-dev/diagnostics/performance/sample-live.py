@@ -18,6 +18,7 @@ try:
   if i and i%10==0:
    fps=(frame-rows[-11]['frame'])/(rows[-1]['seconds']-rows[-11]['seconds'])
    print('elapsed',i,'last10_fps',round(fps,2),'cpu',st[36],flush=True)
+   subprocess.run(['grim','/out/performance/'+label+f'-sample-{i:03}.png'],env=dict(os.environ,XDG_RUNTIME_DIR='/tmp/rt',WAYLAND_DISPLAY='wayland-1'),check=False)
    Path('/out/performance/'+label+'-frames.partial.json').write_text(json.dumps(result(),indent=2))
   if i<duration:time.sleep(max(0,start+i+1-time.monotonic()))
  finished=True
