@@ -142,7 +142,7 @@ private:
                                     const Shader::ImageResource* image_desc, bool& is_pending);
     u32 AcquireImageTableSet(u32 num_entries);
     void BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc,
-                            bool refresh_all = true);
+                            bool refresh_all = true, bool refresh_static = true);
     vk::DescriptorSet GetImageTableSet(const Shader::ImageResource& image_desc,
                                        const Shader::Info& stage);
     void ValidateImageTableSets();
@@ -293,6 +293,7 @@ private:
         AmdGpu::ImageType type{};
         u64 source_revision{};
         std::vector<ImageTableEntry> entries;
+        std::vector<u32> dynamic_entries;
         u64 checked_tick{};
         u64 checked_generation{};
         u64 checked_update_generation{};
