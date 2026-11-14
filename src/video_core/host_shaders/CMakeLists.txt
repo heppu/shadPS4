@@ -38,6 +38,7 @@ function(add_host_shader FILENAME SHADER_NAME)
     set(SHADER_FILES ${SHADER_FILES} ${FILENAME} PARENT_SCOPE)
 endfunction()
 
+add_host_shader(array_download.comp array_download_comp)
 add_host_shader(color_to_ms_depth.frag color_to_ms_depth_frag)
 add_host_shader(ms_image_blit.frag ms_image_blit_frag)
 add_host_shader(ms_image_blit.frag ms_image_blit_msaa_frag SRC_MSAA=1)
