@@ -86,6 +86,9 @@ public:
 
 private:
     void MakeCurrent(const VideoCore::Buffer* handle);
+    bool DownloadImageArray(VideoCore::Image* src, const VideoCore::Buffer* dst,
+                            std::span<const vk::BufferImageCopy> copies);
+    void CreateArrayDownloadPipeline();
 
 private:
     const Instance& instance;
@@ -103,6 +106,9 @@ private:
     VideoCore::Image::Barriers image_barriers;
     vk::MemoryBarrier2 memory_barrier{};
     u64 image_state_generation{};
+    vk::UniqueDescriptorSetLayout array_download_desc_layout;
+    vk::UniquePipelineLayout array_download_layout;
+    vk::UniquePipeline array_download_pipeline;
 };
 
 } // namespace Vulkan
