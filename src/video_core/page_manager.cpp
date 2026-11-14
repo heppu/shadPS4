@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <limits>
+#include <mutex>
+#include <boost/container/small_vector.hpp>
 #include <utility>
 #include "common/adaptive_mutex.h"
 #include "common/assert.h"
@@ -38,6 +41,13 @@
 namespace VideoCore {
 
 struct PageManager::Impl {
+#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
+    using PageMutex = Common::AdaptiveMutex;
+#else
+    using PageMutex = std::mutex;
+#endif
+    using PageLocks = boost::container::small_vector<std::unique_lock<PageMutex>, 8>;
+
     struct PageState {
         u8 num_write_watchers;
         u8 num_read_watchers;
@@ -89,8 +99,7 @@ struct PageManager::Impl {
     };
 
     static constexpr size_t ADDRESS_BITS = 40;
-    static constexpr size_t NUM_ADDRESS_PAGES = 1ULL << (40 - PM_PAGE_BITS);
-    static constexpr size_t NUM_ADDRESS_LOCKS = NUM_ADDRESS_PAGES / NUM_REGION_PAGES;
+    static constexpr size_t LOCK_PAGE_BITS = 6;
     inline static Vulkan::Rasterizer* rasterizer;
 
     Impl() = default;
@@ -112,12 +121,15 @@ struct PageManager::Impl {
         const size_t start_page = begin >> PM_PAGE_BITS;
         const size_t end_page = end >> PM_PAGE_BITS;
         cached_pages.reserve(start_page, end_page);
-        locks.reserve(start_page, end_page);
+        locks.reserve(start_page >> LOCK_PAGE_BITS, end_page >> LOCK_PAGE_BITS);
     }
 
     void UpdatePageWatchers(VAddr addr, u64 size, PageOp write_op) {
         const u64 page_start = addr >> PM_PAGE_BITS;
         const u64 page_end = Common::DivCeil(addr + size, PM_PAGE_SIZE);
+
+        PageLocks held_locks;
+        u64 last_lock = std::numeric_limits<u64>::max();
 
         Core::MemoryPermission perms{};
         u64 range_begin = page_start;
@@ -148,7 +160,11 @@ struct PageManager::Impl {
                 continue;
             }
 
-            locks[page].lock();
+            const u64 lock_index = page >> LOCK_PAGE_BITS;
+            if (lock_index != last_lock) {
+                held_locks.emplace_back(locks[lock_index]);
+                last_lock = lock_index;
+            }
 
             const auto old_perms = state->Perms();
             if (page == page_start) {
@@ -179,12 +195,6 @@ struct PageManager::Impl {
 
         // Add pending (un)protect action
         release_pending();
-
-        for (u64 page = page_start; page != page_end; ++page) {
-            if (auto* lock = locks.find(page)) {
-                lock->unlock();
-            }
-        }
     }
 
     void UpdatePageWatchersForRegion(VAddr base_addr, const Bounds& bounds,
@@ -193,6 +203,9 @@ struct PageManager::Impl {
         const u64 base_page = base_addr >> PM_PAGE_BITS;
         const u64 page_start = bounds.start_word * PAGES_PER_WORD + bounds.start_page;
         const u64 page_end = bounds.end_word * PAGES_PER_WORD + bounds.end_page + 1;
+
+        PageLocks held_locks;
+        u64 last_lock = std::numeric_limits<u64>::max();
 
         Core::MemoryPermission perms{};
         u64 range_begin = base_page + page_start;
@@ -213,7 +226,11 @@ struct PageManager::Impl {
                 continue;
             }
 
-            locks[base_page + page].lock();
+            const u64 lock_index = (base_page + page) >> LOCK_PAGE_BITS;
+            if (lock_index != last_lock) {
+                held_locks.emplace_back(locks[lock_index]);
+                last_lock = lock_index;
+            }
 
             const auto old_perms = state->Perms();
             if (page == page_start) {
@@ -248,12 +265,6 @@ struct PageManager::Impl {
 
         // Add pending (un)protect action
         release_pending();
-
-        for (u64 page = page_start; page != page_end; ++page) {
-            if (auto* lock = locks.find(base_page + page)) {
-                lock->unlock();
-            }
-        }
     }
 
     struct PageTraits {
@@ -265,14 +276,10 @@ struct PageManager::Impl {
     };
     Common::MultiLevelPageTable<PageTraits> cached_pages;
     struct MutexTraits {
-#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-        using Entry = Common::AdaptiveMutex;
-#else
-        using Entry = std::mutex;
-#endif
+        using Entry = PageMutex;
         static constexpr size_t ADDRESS_SPACE_BITS = ADDRESS_BITS;
         static constexpr size_t L1_BITS = 16;
-        static constexpr size_t PAGE_BITS = PM_PAGE_BITS;
+        static constexpr size_t PAGE_BITS = PM_PAGE_BITS + LOCK_PAGE_BITS;
         static constexpr bool NULL_CHECK = false;
     };
     Common::MultiLevelPageTable<MutexTraits> locks;
