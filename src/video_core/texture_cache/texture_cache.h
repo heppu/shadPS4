@@ -417,6 +417,8 @@ public:
     }
 
 private:
+    SmallVector<ImageId, 8> FindImagesInRegion(VAddr address, size_t size);
+
     /// Iterate over all page indices in a range
     template <typename Func>
     static void ForEachPage(PAddr addr, size_t size, Func&& func) {

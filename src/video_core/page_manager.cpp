@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <limits>
 #include <mutex>
-#include <boost/container/small_vector.hpp>
 #include <utility>
+#include <boost/container/small_vector.hpp>
 #include "common/adaptive_mutex.h"
 #include "common/assert.h"
 #include "common/debug.h"
