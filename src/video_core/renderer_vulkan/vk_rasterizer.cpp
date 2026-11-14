@@ -2373,6 +2373,12 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
     runtime.CopyBuffer(src_buffer, dst_buffer, std::span{&copy, 1});
 }
 
+u32 Rasterizer::ReadMemory32(VAddr address) {
+    u32 value;
+    buffer_cache.ReadHostMemory(address, std::span{reinterpret_cast<u8*>(&value), sizeof(value)});
+    return value;
+}
+
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
     auto* gds_buf = buffer_cache.GetGdsBuffer();
     u32 value;

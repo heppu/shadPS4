@@ -107,6 +107,14 @@ void Liverpool::ProcessCeQueue() {
     }
 }
 
+bool Liverpool::TestWaitRegMem(const PM4CmdWaitRegMem& wait) const {
+    const u32 value =
+        wait.mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Memory
+            ? rasterizer ? rasterizer->ReadMemory32(wait.Address<VAddr>()) : *wait.Address()
+            : regs.reg_array[wait.Reg()];
+    return wait.Test(value);
+}
+
 void Liverpool::ProcessCommands() {
     // Process incoming commands with high priority
     while (num_commands) {
@@ -854,10 +862,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
                 if (vo_port->IsVoLabel(wait_addr) &&
                     num_submits == mapped_queues[GfxQueueId].submits.size()) {
-                    vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
+                    vo_port->WaitVoLabel([&] { return TestWaitRegMem(*wait_reg_mem); });
                     break;
                 }
-                while (!wait_reg_mem->Test(regs.reg_array)) {
+                while (!TestWaitRegMem(*wait_reg_mem)) {
                     YIELD_GFX();
                 }
                 break;
@@ -1218,7 +1226,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         case PM4ItOpcode::WaitRegMem: {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
-            while (!wait_reg_mem->Test(regs.reg_array)) {
+            while (!TestWaitRegMem(*wait_reg_mem)) {
                 YIELD_ASC(vqid);
             }
             break;
