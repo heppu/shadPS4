@@ -1605,7 +1605,7 @@ u32 Rasterizer::AcquireImageTableSet(u32 num_entries) {
 }
 
 void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource* image_desc,
-                                    bool refresh_all) {
+                                    bool refresh_all, bool refresh_static) {
     DropRemappedTableKeys();
     const u64 epoch = TableEpoch();
     const u64 generation = texture_cache.ImageGeneration();
@@ -1664,7 +1664,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             }
             auto& gpu_views = image_table_gpu_views;
             gpu_views.clear();
-            for (auto& candidate : table.entries) {
+            const auto refresh_entry = [&](ImageTableEntry& candidate) {
                 if (!refresh_all && !candidate.is_dynamic &&
                     candidate.update_version ==
                         texture_cache.ImageUpdateVersion(candidate.image_id)) {
@@ -1675,7 +1675,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                             resolved.used_tick = epoch;
                             texture_cache.KeepAlive(resolved.image_id);
                         }
-                        continue;
+                        return;
                     }
                 }
                 candidate.is_dynamic = true;
@@ -1692,7 +1692,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 u64 key = candidate.key;
                 if (key == 0) {
                     clear_entry(i);
-                    continue;
+                    return;
                 }
                 vk::ImageView view;
                 if (table.is_depth || table.is_read) {
@@ -1725,7 +1725,28 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 } else {
                     clear_entry(i);
                 }
+            };
+            const bool scan_all =
+                refresh_all || refresh_static || reset_entries || table.current_set < 0;
+            const u32 count = scan_all ? table.entries.size() : table.dynamic_entries.size();
+            if (scan_all) {
+                table.dynamic_entries.clear();
             }
+            u32 dynamic_count = 0;
+            for (u32 index = 0; index < count; ++index) {
+                const u32 entry_index = scan_all ? index : table.dynamic_entries[index];
+                auto& candidate = table.entries[entry_index];
+                refresh_entry(candidate);
+                if (candidate.is_dynamic) {
+                    if (scan_all) {
+                        table.dynamic_entries.push_back(entry_index);
+                    } else {
+                        table.dynamic_entries[dynamic_count] = entry_index;
+                    }
+                    ++dynamic_count;
+                }
+            }
+            table.dynamic_entries.resize(dynamic_count);
             if (table_steals == 0) {
                 break;
             }
@@ -1735,7 +1756,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
 
     if (validated_generation != table_view_generation ||
         generation != texture_cache.ImageGeneration()) {
-        for (const auto& candidate : table.entries) {
+        bool invalidated = false;
+        for (auto& candidate : table.entries) {
             const u32 i = candidate.index;
             const auto view =
                 scratch_ready ? image_table_views[i] : image_table_sets[table.current_set].views[i];
@@ -1749,7 +1771,17 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 (generation != texture_cache.ImageGeneration() &&
                  !texture_cache.TryGetImage(entry->second.image_id, entry->second.image_uid))) {
                 clear_entry(i);
+                invalidated = true;
+                candidate.is_dynamic = true;
                 table.has_unresolved = true;
+            }
+        }
+        if (invalidated) {
+            table.dynamic_entries.clear();
+            for (u32 index = 0; index < table.entries.size(); ++index) {
+                if (table.entries[index].is_dynamic) {
+                    table.dynamic_entries.push_back(index);
+                }
             }
         }
     }
@@ -1889,10 +1921,11 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                            !table_remapped_ranges.empty() ||
                            (it->current_set >= 0 && image_table_sets[it->current_set].generation !=
                                                         texture_cache.ImageGeneration());
-        const bool refresh_changed = it->checked_tick != gc_tick ||
-                                     it->checked_update_generation != update_generation ||
-                                     it->checked_state_generation != state_generation ||
-                                     it->has_unresolved || it->has_gpu_images;
+        const bool refresh_static = it->checked_tick != gc_tick ||
+                                    it->checked_update_generation != update_generation ||
+                                    it->checked_state_generation != state_generation ||
+                                    it->validated_view_generation != table_view_generation;
+        const bool refresh_changed = refresh_static || it->has_unresolved || it->has_gpu_images;
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         it->checked_alias_generation = alias_generation;
@@ -1943,7 +1976,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         if (refresh_all || refresh_changed) {
             it->checked_update_generation = update_generation;
             it->checked_state_generation = state_generation;
-            BuildImageTableSet(table_index, &image_desc, refresh_all);
+            BuildImageTableSet(table_index, &image_desc, refresh_all, refresh_static);
         }
 
         if (gc_tick - table_evict_tick >= EvictInterval) {
