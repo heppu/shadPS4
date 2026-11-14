@@ -198,6 +198,7 @@ private:
     template <bool is_indirect = false>
     Task ProcessCompute(std::span<const u32> acb, u32 vqid);
 
+    bool TestWaitRegMem(const PM4CmdWaitRegMem& wait) const;
     void ProcessCommands();
     void ProcessCeQueue();
     void Process(std::stop_token stoken);
