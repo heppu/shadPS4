@@ -68,6 +68,19 @@ public:
         std::size_t m = 0;
 
         auto [first, last] = OverlapRun(value.start, value.end);
+        if constexpr (std::same_as<IV, Interval>) {
+            if (first != last) {
+                if (first->start <= value.start && first->end >= value.end) {
+                    return;
+                }
+                value.start = std::min(value.start, first->start);
+                value.end = std::max(value.end, std::prev(last)->end);
+            }
+            const auto at = std::distance(intervals.begin(), first);
+            Splice(first, last, &value, 1);
+            Coalesce(at, 1);
+            return;
+        }
         if (first != last) {
             if (first->start < value.start) {
                 out[m++] = first->SubRange(first->start, value.start);
