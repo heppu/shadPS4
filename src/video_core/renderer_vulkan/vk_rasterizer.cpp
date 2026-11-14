@@ -1571,8 +1571,38 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
         return;
     }
     table.built_empty = table.entries.empty();
+    const bool reset_entries = std::exchange(table.entries_changed, false);
     const u64 validated_generation =
         refresh_all ? table_view_generation : table.validated_view_generation;
+    bool scratch_ready = false;
+    const auto prepare_scratch = [&] {
+        if (!scratch_ready) {
+            const auto& current = image_table_sets[table.current_set];
+            image_table_keys = current.keys;
+            image_table_views = current.views;
+            image_table_layouts = current.layouts;
+            scratch_ready = true;
+        }
+    };
+    const auto set_entry = [&](u32 index, u64 key, vk::ImageView view, vk::ImageLayout layout) {
+        if (!scratch_ready) {
+            const auto& current = image_table_sets[table.current_set];
+            if (current.keys[index] == key && current.views[index] == view &&
+                current.layouts[index] == layout) {
+                return;
+            }
+            prepare_scratch();
+        }
+        image_table_keys[index] = key;
+        image_table_views[index] = view;
+        image_table_layouts[index] = layout;
+    };
+    const auto clear_entry = [&](u32 index) {
+        const auto layout = refresh_all     ? vk::ImageLayout::eShaderReadOnlyOptimal
+                            : scratch_ready ? image_table_layouts[index]
+                                            : image_table_sets[table.current_set].layouts[index];
+        set_entry(index, 0, vk::ImageView{}, layout);
+    };
     {
         // Reading an image again for one entry changes what earlier entries of this pass
         // show through it, so go over the table once more when that happened.
@@ -1581,12 +1611,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
             table_steals = 0;
             table.has_unresolved = false;
             table.has_gpu_images = false;
-            if (!refresh_all && table.current_set >= 0) {
-                const auto& current = image_table_sets[table.current_set];
-                image_table_keys = current.keys;
-                image_table_views = current.views;
-                image_table_layouts = current.layouts;
-            } else {
+            scratch_ready = reset_entries || table.current_set < 0;
+            if (scratch_ready) {
                 image_table_keys.assign(table.num_entries, 0);
                 image_table_views.assign(table.num_entries, vk::ImageView{});
                 image_table_layouts.assign(table.num_entries,
@@ -1602,8 +1628,6 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 }
                 candidate.is_dynamic = true;
                 const u32 i = candidate.index;
-                image_table_keys[i] = 0;
-                image_table_views[i] = vk::ImageView{};
                 const auto& tsharp = candidate.sharp;
                 if (candidate.key == 0 || (!table.is_depth && !table.is_read &&
                                            (candidate.key_tick != epoch ||
@@ -1615,6 +1639,7 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 }
                 u64 key = candidate.key;
                 if (key == 0) {
+                    clear_entry(i);
                     continue;
                 }
                 vk::ImageView view;
@@ -1635,16 +1660,16 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                     candidate.key_generation = table_key_generation;
                 }
                 if (view) {
-                    image_table_keys[i] = key;
-                    image_table_views[i] = view;
                     auto& resolved = table_images.at(key);
-                    image_table_layouts[i] = resolved.layout;
+                    set_entry(i, key, view, resolved.layout);
                     const auto* image = resolved.GetImage(texture_cache);
                     candidate.image_id = resolved.image_id;
                     candidate.update_version = resolved.synced_update_version;
                     candidate.is_dynamic =
                         !image || !image->IsReadOnlyTexture() || image->binding.needs_rebind;
                     table.has_gpu_images |= candidate.is_dynamic;
+                } else {
+                    clear_entry(i);
                 }
             }
             if (table_steals == 0) {
@@ -1658,20 +1683,27 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
         generation != texture_cache.ImageGeneration()) {
         for (const auto& candidate : table.entries) {
             const u32 i = candidate.index;
-            if (!image_table_views[i]) {
+            const auto view =
+                scratch_ready ? image_table_views[i] : image_table_sets[table.current_set].views[i];
+            if (!view) {
                 continue;
             }
-            const auto entry = table_images.find(image_table_keys[i]);
-            if (entry == table_images.end() || entry->second.view != image_table_views[i] ||
+            const u64 key =
+                scratch_ready ? image_table_keys[i] : image_table_sets[table.current_set].keys[i];
+            const auto entry = table_images.find(key);
+            if (entry == table_images.end() || entry->second.view != view ||
                 (generation != texture_cache.ImageGeneration() &&
                  !texture_cache.TryGetImage(entry->second.image_id, entry->second.image_uid))) {
-                image_table_views[i] = vk::ImageView{};
-                image_table_keys[i] = 0;
+                clear_entry(i);
                 table.has_unresolved = true;
             }
         }
     }
     table.validated_view_generation = table_view_generation;
+    if (!scratch_ready) {
+        image_table_sets[table.current_set].generation = generation;
+        return;
+    }
     if (table.current_set >= 0 && image_table_sets[table.current_set].views == image_table_views &&
         image_table_sets[table.current_set].layouts == image_table_layouts) {
         auto& set = image_table_sets[table.current_set];
@@ -1778,6 +1810,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
             if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
                 refresh_all = true;
                 std::memcpy(it->shadow.data(), source, bytes);
+                it->entries_changed = true;
                 it->entries.clear();
                 for (u32 i = 0; i < it->num_entries; ++i) {
                     AmdGpu::Image tsharp{};
@@ -1801,6 +1834,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
             }
         } else {
             refresh_all |= !it->entries.empty();
+            it->entries_changed |= !it->entries.empty();
             std::ranges::fill(it->shadow, u8{0});
             it->entries.clear();
         }
