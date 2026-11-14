@@ -52,3 +52,42 @@ before ending a session. Previous split-branch tips are retained as archive tags
 The live runtime directory remains `/mnt/games/PS4/bo4-dev`; keep its scripts in
 sync with this directory when changing them. Its user data, downloads and captures
 are runtime inputs/outputs, not repository source.
+
+## Temporary performance launch
+
+`./play-fast` wraps the windowed launcher with temporary AMD GPU `high` policy
+and places only the render thread on the largest-cache CPU cluster when the
+host has unequal L3 cache sizes. On this 9950X3D it chooses CPU 7. Placement waits
+60 seconds for startup workers. The policy helper watches the owned container's
+host PID and start time, survives that container's shutdown, and restores the
+original policy after its GPU context closes. This can increase GPU power usage
+while the game runs. It leaves other applications running.
+
+Override with `BO4_GPU_MODE=off` and/or `BO4_RENDER_CPUS=off`; an explicit CPU list
+is also accepted. `./play-fast --headless 1200` uses X11 for the existing menu
+automation. The standalone `run` retains Wayland by default and now accepts an
+explicit `SDL_VIDEODRIVER`. Policy restoration and native launch/CPU placement
+have been checked; sustained 30 FPS is not yet established.
+
+## Profile-guided build experiment
+
+`./pgo-build generate` builds a separate native-CPU instrumented executable in
+`build-pgo-gen`, reusing the normal build's downloaded dependencies offline.
+The development container must already contain LLVM and a normal build.
+`BO4_BUILD_JOBS` controls parallelism (default eight). The training-only
+`pgo-checkpoint.cpp` waits for `out/performance/pgo-dump.request`, writes a full
+LLVM profile under `out/performance/pgo-checkpoints`, then records its return
+code and path in `pgo-dump.status`. Only a zero result and a successful
+`llvm-profdata merge` establish a usable checkpoint.
+
+The initial LLVM 23.1.4 continuous-profile experiment produced truncated data
+when indirect calls were present. A small reproducer confirmed the issue; the
+explicit runtime checkpoint preserves readable indirect-call profiles. Invalid
+continuous profiles are kept outside the checkpoint directory and must not be
+merged. The training code is excluded from the optimized build.
+
+After training with representative gameplay, merge the valid checkpoint into
+`out/performance/pgo.profdata` using `llvm-profdata` in `sd`. `./pgo-build use`
+then rebuilds the normal `build/shadps4` using that profile and native CPU
+instructions. This is machine-specific. It still needs rendering probes and
+native FPS validation before adoption; the experiment is currently unfinished.

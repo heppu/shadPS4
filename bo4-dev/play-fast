@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Launch the game with temporary GPU policy and render-thread placement."""
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from performance_watch import process_start
+
+
+def cpu_list(value):
+    result = set()
+    for part in value.split(','):
+        limits = [int(x) for x in part.split('-')]
+        if len(limits) not in (1, 2) or limits[0] > limits[-1]:
+            raise ValueError('invalid CPU list')
+        result.update(range(limits[0], limits[-1] + 1))
+    return result
+
+
+def render_cpus():
+    requested = os.environ.get('BO4_RENDER_CPUS', 'auto')
+    allowed = os.sched_getaffinity(0)
+    if requested == 'off':
+        return set()
+    if requested != 'auto':
+        selected = cpu_list(requested)
+        if not selected or not selected <= allowed:
+            raise ValueError('requested render CPUs unavailable')
+        return selected
+    caches = {}
+    for cpu in allowed:
+        root = Path(f'/sys/devices/system/cpu/cpu{cpu}')
+        try:
+            size = (root / 'cache/index3/size').read_text().strip()
+            caches[cpu] = int(size.rstrip('KM')) * (1024 if size.endswith('M') else 1)
+        except (OSError, ValueError):
+            return set()
+    if len(set(caches.values())) < 2:
+        return set()
+    largest = max(caches.values())
+    physical = set()
+    for cpu, size in caches.items():
+        if size == largest:
+            siblings = cpu_list(Path(f'/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list').read_text().strip())
+            physical.add(min(siblings & allowed))
+    return {max(physical)}
+
+
+def inspect(name):
+    result = subprocess.run(['docker', 'inspect', name], capture_output=True, text=True)
+    return json.loads(result.stdout)[0] if result.returncode == 0 else None
+
+
+def belongs_to(pid, ancestor):
+    seen = set()
+    while pid > 1 and pid not in seen:
+        if pid == ancestor:
+            return True
+        seen.add(pid)
+        try:
+            pid = int(Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
+
+
+def pin_render(init_pid, selected):
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if proc.joinpath('cmdline').read_bytes().split(b'\0')[0] != b'/src/build/shadps4':
+                continue
+            if not belongs_to(int(proc.name), init_pid):
+                continue
+            for task in proc.joinpath('task').iterdir():
+                if task.joinpath('comm').read_text().strip() == 'shadPS4:GpuComm':
+                    before = os.sched_getaffinity(int(task.name))
+                    if not selected <= before:
+                        raise ValueError('render CPUs unavailable in game process')
+                    os.sched_setaffinity(int(task.name), selected)
+                    print(f'Render thread {task.name}: CPUs {sorted(selected)}', flush=True)
+                    return True
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return False
+
+
+def main():
+    headless = len(sys.argv) > 1 and sys.argv[1] == '--headless'
+    if len(sys.argv) > (3 if headless else 1):
+        raise SystemExit('usage: play-fast [--headless seconds]')
+    name = 'shad-run' if headless else 'shad-play'
+    current = inspect(name)
+    if current and current['State']['Running']:
+        raise SystemExit(f'{name} is already running; close it before launching another instance')
+    selected = render_cpus()
+    mode = os.environ.get('BO4_GPU_MODE', 'high')
+    if mode not in ('off', 'high', 'profile_peak'):
+        raise SystemExit('BO4_GPU_MODE must be off, high or profile_peak')
+    command = [str(HERE / ('run' if headless else 'play'))]
+    if headless:
+        seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 1200
+        if seconds <= 0:
+            raise ValueError('headless duration must be positive')
+        command.append(str(seconds))
+    launch_env = dict(os.environ)
+    if headless:
+        launch_env.setdefault('SDL_VIDEODRIVER', 'x11')
+    child = subprocess.Popen(command, cwd=HERE, env=launch_env)
+    owned = None
+    helper = None
+
+    def interrupted(signum, frame):
+        raise InterruptedError(signum)
+
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, interrupted)
+    try:
+        deadline = time.monotonic() + 60
+        while child.poll() is None and time.monotonic() < deadline:
+            state = inspect(name)
+            if state and state['State']['Running']:
+                owned = state['Id']
+                init_pid = state['State']['Pid']
+                start_time = process_start(init_pid)
+                break
+            time.sleep(.25)
+        else:
+            return child.wait()
+        devices = [p for p in Path('/sys/class/drm').glob('card*/device')
+                   if (p / 'mem_info_vram_total').exists() and
+                   (p / 'power_dpm_force_performance_level').exists()]
+        if mode != 'off' and devices and start_time:
+            device = max(devices, key=lambda p: int((p / 'mem_info_vram_total').read_text()))
+            status = HERE / 'out/play-performance.json'
+            status.touch()
+            status.chmod(0o666)
+            helper = f'bo4-play-performance-{init_pid}'
+            result = subprocess.run([
+                'docker', 'run', '--rm', '-d', '--name', helper, '--pid=host',
+                '--network', 'none', '--read-only', '--user', '0:0', '--cap-drop', 'ALL',
+                '-e', 'PYTHONDONTWRITEBYTECODE=1',
+                '-v', f'{device}/power_dpm_force_performance_level:/gpu-performance-level:rw',
+                '-v', f'{HERE}/performance_watch.py:/performance_watch.py:ro',
+                '-v', f'{HERE}/out:/out', 'shad-dev', 'python3', '/performance_watch.py',
+                '--pid', str(init_pid), '--start-time', start_time, '--mode', mode,
+                '--status', '/out/play-performance.json'], capture_output=True, text=True)
+            if result.returncode:
+                print('GPU policy helper failed: ' + result.stderr, file=sys.stderr)
+                helper = None
+            else:
+                print(f'Temporary GPU policy: {mode}; restored when game exits', flush=True)
+        pin_at = time.monotonic() + 60
+        pinned = not selected
+        while child.poll() is None:
+            if not pinned and time.monotonic() >= pin_at:
+                pinned = pin_render(init_pid, selected)
+            time.sleep(.5)
+        return child.returncode
+    except InterruptedError as error:
+        return 128 + error.args[0]
+    finally:
+        if child.poll() is None:
+            if owned:
+                subprocess.run(['docker', 'stop', '--time', '3', owned], stdout=subprocess.DEVNULL)
+            else:
+                child.terminate()
+            child.wait()
+        if helper:
+            subprocess.run(['docker', 'wait', helper], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
