@@ -17,3 +17,12 @@ The saved pre-change subgroup-safe build and the retained-entry candidate both
 pass all seven cases with Vulkan core/synchronization validation. GDB confirms
 that foreign mip expansion advances image generation from 0 to 1 and that the
 surviving table is rebuilt with full=False/static=True on the candidate.
+
+The cache-growth phase inserts 32 distinct, constant-valued textures through
+separate tables, then reuses the original table. Exact samples and guards check
+that references survive map growth while the changed original descriptor and
+CPU-updated texture remain correct.
+
+The expanded eight-case fixture passes on both the saved layered-copy build and
+the experimental reference-cache build. The latter optimization was removed
+after native profiling failed to demonstrate a gain.
