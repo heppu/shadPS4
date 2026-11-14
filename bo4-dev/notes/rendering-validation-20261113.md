@@ -1495,3 +1495,38 @@ A diagnostic found an earlier 6 GiB advertised-heap run reporting about 7.56 GiB
 of device usage against a 3.87 GiB critical collection threshold. A larger
 advertised-budget comparison is in progress, with aggregate memory guards
 unchanged. No claim of playable performance is made from these diagnostics.
+
+### Retired sparse backing pool eviction (checkpoint)
+
+The exact-size retired-memory pool now evicts its oldest completed allocations
+when admitting a new size would exceed 128 MiB. Size lookup and retirement order
+use separate ordered indexes, avoiding a repeated linear scan when many small
+allocations must be retired. Reuse still happens only after the unbind submission
+completes. Pool capacity and memory guards are unchanged.
+
+The original buffer_mapping_lifetimes homebrew now checks 44 lifetimes: twelve
+64 KiB cases followed by two cycles from 1 to 16 MiB, with source/output/guard
+checks. It passes on both the old pool and new pool. All sixteen rendering probes
+pass (pool-lru-summary.log); build: pool-lru-order-build.log. The new binary is
+saved as shadps4-pool-lru.
+
+At the same 10 GiB advertised heap, IX stationary firing measured 19.58 FPS versus
+17.10 for the saved 0ef31fab control. These runs include different characters,
+enemy positions and downed timing, so they are not identical-frame comparisons.
+The candidate also includes the preceding direct-read table layout change.
+Sampled AllocateBacking/RecycleBacking CPU proportions fell from 8.92%/8.45%
+to 1.54%/1.49%. Rendering CPU was 53.47% versus 52.47%; GPU busy 53.08% versus
+57.66%. Playable sustained combat remains unproven and optimization continues.
+
+The current bright IX capture replay completed its GPU counters with a 9 GiB
+GTT cap, a stricter 30 GiB available-RAM floor, and unchanged 12 GiB VRAM / 28 GiB
+container caps. It used approximately 8.3 GiB VRAM and 7.1 GiB GTT with over
+50 GiB RAM available. Per-event durations total 23.91 ms: indirect draws 15.38 ms,
+direct indexed draws 5.48 ms, buffer copies 1.56 ms. No single event exceeded
+0.11 ms. This instrumented replay is not native frame time. Optional hot-shader
+extraction was stopped after the counter data was saved; its output is partial.
+
+After native timing, a 128-call GPU-drain audit found 101 CPU-requested buffer
+readbacks, nine command-processor buffer reads, and nine each EOS/EOP image
+readback drains. A later readback-address sample was taken during the transition
+to the after-action report, so it must not be treated as a combat workload.
