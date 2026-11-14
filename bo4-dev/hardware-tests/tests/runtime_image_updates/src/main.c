@@ -68,6 +68,15 @@ int main(void) {
             data[i] = t ? .25f : .125f;
         sceGnmTexSetBaseAddress(&textures[t], data);
     }
+    for (unsigned t = 0; t < 2; ++t) {
+        for (uint64_t offset = 0; offset < sizes[t]; offset += 16384) {
+            void* address = (uint8_t*)pixels[t] + offset;
+            const off_t physical = arena.direct_memory + ((uint8_t*)pixels[t] - arena.base) + offset;
+            if (sceKernelMapDirectMemory(&address, 16384, ST_MEMORY_PROT,
+                                         ST_MAP_FIXED | 0x400000, physical, 16384) != 0)
+                return st_fail("reason=split_texture_mapping");
+        }
+    }
     void* alias = NULL;
     if (!st_dmem_map(&alias, arena.size, arena.direct_memory, false))
         return st_fail("reason=alias_mapping");
@@ -197,5 +206,5 @@ int main(void) {
     }
     sceGnmSubmitDone();
     return st_finish_cases(cases, 10,
-                           "cpu_update_one=1 cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 late_alias=1 remap_reuse=1 unrelated_remap=1 descriptor_remap=1 guards=1");
+                           "cpu_update_one=1 cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 split_mapping=1 late_alias=1 remap_reuse=1 unrelated_remap=1 descriptor_remap=1 guards=1");
 }

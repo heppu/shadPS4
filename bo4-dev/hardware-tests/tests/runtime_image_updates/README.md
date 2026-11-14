@@ -47,3 +47,7 @@ The alias-lifetime follow-up removes the initial alias after the first GPU read,
 then recreates it immediately before the physical-alias write phase. This checks
 transitions between one and multiple virtual mappings after a texture is already
 cached. The old early-alias ELF is retained separately in local validation output.
+
+Each texture is also remapped as separate 16 KiB direct-memory ranges with
+NoCoalesce before the first read. Aliasing classification must cover all of a
+texture's backing ranges; crossing a virtual-map boundary alone is not an alias.
