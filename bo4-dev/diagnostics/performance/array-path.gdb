@@ -7,6 +7,7 @@ continue
 print src->info.pixel_format
 print src->info.resources
 print copies
+disable 1
 finish
 print $rax
 detach
