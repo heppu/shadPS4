@@ -58,6 +58,7 @@ struct InfoPersistent {
     bool has_fetch_shader{};
     bool has_bitwise_xor{};
     bool uses_dma{};
+    bool requires_wave64{true};
 
     bool UsesBufferTables() const {
         return std::ranges::any_of(buffers, &BufferResource::IsTable);
