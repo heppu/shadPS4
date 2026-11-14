@@ -450,15 +450,20 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     table_sets.clear();
     bound_image_tables.clear();
 
+    // Descriptor reads may flush buffers, so finish them before marking new outputs GPU-written.
     size_t num_image_infos{};
     size_t num_sampler_tables{};
     sampler_snapshot_index = 0;
+    ++image_table_bind;
     for (const auto* stage : pipeline->GetStages()) {
         if (!stage) {
             continue;
         }
         for (const auto& image : stage->images) {
             num_image_infos += image.NumBindings(*stage);
+            if (image.IsTable()) {
+                SnapshotImageTable(image, *stage);
+            }
         }
         num_image_infos += stage->samplers.size();
         for (const auto& sampler : stage->samplers) {
@@ -1797,6 +1802,46 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
     table.current_set = static_cast<s32>(set_index);
 }
 
+void Rasterizer::SnapshotImageTable(const Shader::ImageResource& image, const Shader::Info& stage) {
+    const auto table = image.GetTableSharp(stage);
+    const VAddr address = table.base_address;
+    const u32 bytes = table.GetSize();
+    const auto cached = std::ranges::find_if(image_tables, [&](const ImageTable& table) {
+        return table.Matches(address, bytes, image);
+    });
+    const u32 type_index = static_cast<u32>(image.table_type) + (image.is_depth ? 16 : 0) +
+                           (image.is_r128 ? 32 : 0) + (image.table_is_read ? 64 : 0) +
+                           128 * static_cast<u32>(image.table_number_format);
+    if (cached != image_tables.end() && !image.is_depth && !image.table_is_read &&
+        cached->current_set >= 0 && cached->checked_tick == TableEpoch() &&
+        cached->checked_generation == table_cache_generation &&
+        cached->checked_alias_generation == memory->DirectAliasGeneration() &&
+        last_image_tables[type_index] == std::distance(image_tables.begin(), cached)) {
+        return;
+    }
+    auto it = std::ranges::find_if(image_table_sources, [&](const ImageTableSource& source) {
+        return source.address == address && source.bytes == bytes;
+    });
+    if (it == image_table_sources.end()) {
+        it = image_table_sources.insert(image_table_sources.end(),
+                                        ImageTableSource{.address = address, .bytes = bytes});
+    }
+    if (it->bind == image_table_bind) {
+        return;
+    }
+    it->bind = image_table_bind;
+    if (bytes == 0 || !memory->IsValidMapping(address, bytes)) {
+        if (!it->data.empty()) {
+            it->data.clear();
+            ++it->revision;
+        }
+        return;
+    }
+    if (buffer_cache.UpdateHostMemory(address, bytes, it->data)) {
+        ++it->revision;
+    }
+}
+
 vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& image_desc,
                                                const Shader::Info& stage) {
     static constexpr u64 EvictInterval = 64;
@@ -1806,13 +1851,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     const VAddr address = vsharp.base_address;
     const u32 bytes = vsharp.GetSize();
     auto it = std::ranges::find_if(image_tables, [&](const ImageTable& table) {
-        return table.address == address && table.bytes == bytes &&
-               table.stride_dw == image_desc.table_stride_dw &&
-               table.offset_dw == image_desc.table_offset_dw &&
-               table.num_entries == image_desc.table_size && table.type == image_desc.table_type &&
-               table.is_depth == image_desc.is_depth && table.is_r128 == image_desc.is_r128 &&
-               table.is_read == image_desc.table_is_read &&
-               table.number_format == image_desc.table_number_format;
+        return table.Matches(address, bytes, image_desc);
     });
     if (it == image_tables.end()) {
         it = image_tables.insert(image_tables.end(), ImageTable{});
@@ -1826,12 +1865,12 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->is_r128 = image_desc.is_r128;
         it->is_read = image_desc.table_is_read;
         it->number_format = image_desc.table_number_format;
-        const u64 shadow_size =
-            (u64{it->num_entries} * it->stride_dw + it->offset_dw) * sizeof(u32) +
-            sizeof(AmdGpu::Image);
-        it->shadow.assign(std::max<u64>(bytes, shadow_size), 0);
     }
     const u32 table_index = static_cast<u32>(std::distance(image_tables.begin(), it));
+    const auto& source = *std::ranges::find_if(image_table_sources, [&](const ImageTableSource& s) {
+        return s.address == address && s.bytes == bytes;
+    });
+    const bool source_changed = it->source_revision != source.revision;
 
     const u64 gc_tick = TableEpoch();
     const u64 alias_generation = memory->DirectAliasGeneration();
@@ -1842,7 +1881,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
     const bool is_switched = std::exchange(last_table, table_index) != table_index;
     if (it->is_depth || it->is_read || it->current_set < 0 || it->checked_tick != gc_tick ||
         it->checked_generation != table_cache_generation ||
-        it->checked_alias_generation != alias_generation || is_switched) {
+        it->checked_alias_generation != alias_generation || is_switched || source_changed) {
         const u64 update_generation = texture_cache.UpdateGeneration();
         const u64 state_generation = runtime.ImageStateGeneration();
         bool refresh_all = it->current_set < 0 ||
@@ -1857,19 +1896,19 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         it->checked_tick = gc_tick;
         it->checked_generation = table_cache_generation;
         it->checked_alias_generation = alias_generation;
-        if (bytes != 0 && memory->IsValidMapping(address, bytes)) {
-            const auto* source = reinterpret_cast<const void*>(address);
-            if (std::memcmp(it->shadow.data(), source, bytes) != 0) {
-                std::memcpy(it->shadow.data(), source, bytes);
+        it->source_revision = source.revision;
+        if (!source.data.empty()) {
+            if (source_changed) {
                 image_table_entries.clear();
                 image_table_entries.reserve(it->entries.size());
                 auto previous = it->entries.begin();
                 for (u32 i = 0; i < it->num_entries; ++i) {
                     AmdGpu::Image tsharp{};
-                    std::memcpy(&tsharp,
-                                it->shadow.data() +
-                                    (u64{i} * it->stride_dw + it->offset_dw) * sizeof(u32),
-                                it->is_r128 ? 16 : sizeof(tsharp));
+                    const u64 offset = (u64{i} * it->stride_dw + it->offset_dw) * sizeof(u32);
+                    const u64 width = it->is_r128 ? 16 : sizeof(tsharp);
+                    if (offset + width <= source.data.size()) {
+                        std::memcpy(&tsharp, source.data.data() + offset, width);
+                    }
                     if (it->is_r128) {
                         tsharp.pitch = tsharp.width;
                     }
@@ -1899,7 +1938,6 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
         } else {
             refresh_all |= !it->entries.empty();
             it->entries_changed |= !it->entries.empty();
-            std::ranges::fill(it->shadow, u8{0});
             it->entries.clear();
         }
         if (refresh_all || refresh_changed) {

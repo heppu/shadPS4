@@ -262,6 +262,8 @@ public:
         return direct_alias_generation.load(std::memory_order_acquire);
     }
 
+    std::optional<bool> CompareDirectBacking(VAddr virtual_addr, std::span<const u8> data);
+
     std::optional<u64> HashDirectBacking(VAddr virtual_addr, u64 size);
 
     /// Samples readable direct-memory CPU backing without synchronizing GPU-owned ranges.
