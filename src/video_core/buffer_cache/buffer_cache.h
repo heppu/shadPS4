@@ -110,6 +110,8 @@ public:
 
     void ReadHostMemory(VAddr device_addr, std::span<u8> dest);
 
+    bool UpdateHostMemory(VAddr device_addr, u32 size, std::vector<u8>& dest);
+
     /// Flushes GPU modified ranges of the uncovered part of the edge pages of an image.
     void ReadEdgeImagePages(const Image& image);
 
