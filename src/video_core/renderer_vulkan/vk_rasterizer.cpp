@@ -451,6 +451,8 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     bound_image_tables.clear();
 
     size_t num_image_infos{};
+    size_t num_sampler_tables{};
+    sampler_snapshot_index = 0;
     for (const auto* stage : pipeline->GetStages()) {
         if (!stage) {
             continue;
@@ -459,6 +461,24 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             num_image_infos += image.NumBindings(*stage);
         }
         num_image_infos += stage->samplers.size();
+        for (const auto& sampler : stage->samplers) {
+            if (!sampler.IsTable()) {
+                continue;
+            }
+            if (sampler_table_snapshots.size() <= num_sampler_tables) {
+                sampler_table_snapshots.emplace_back();
+            }
+            auto& snapshot = sampler_table_snapshots[num_sampler_tables++];
+            const auto table = sampler.GetTableSharp(*stage);
+            snapshot.address = table.base_address;
+            const u64 covered_bytes =
+                (u64{sampler.table_size - 1} * sampler.table_stride_dw + sampler.table_offset_dw) *
+                    sizeof(u32) +
+                sizeof(AmdGpu::Sampler);
+            const u64 bytes = std::min<u64>(table.GetSize(), covered_bytes);
+            snapshot.data.resize(memory->IsValidMapping(snapshot.address, bytes) ? bytes : 0);
+            buffer_cache.ReadHostMemory(snapshot.address, snapshot.data);
+        }
     }
     image_infos.reserve(num_image_infos);
 
@@ -1948,11 +1968,17 @@ vk::Sampler Rasterizer::ResolveSampler(AmdGpu::Sampler ssharp, bool is_depth) {
 }
 
 void Rasterizer::ResolveSamplerTable(const Shader::SamplerResource& sampler,
-                                     const AmdGpu::Buffer& table, const Shader::Info& stage) {
+                                     std::span<const u8> table, const Shader::Info& stage) {
     sampler_table_infos.clear();
     for (u32 i = 0; i < sampler.table_size; ++i) {
+        AmdGpu::Sampler ssharp{};
+        const u64 offset =
+            (u64{i} * sampler.table_stride_dw + sampler.table_offset_dw) * sizeof(u32);
+        if (offset + sizeof(ssharp) <= table.size()) {
+            std::memcpy(&ssharp, table.data() + offset, sizeof(ssharp));
+        }
         const auto vk_sampler =
-            ResolveSampler(sampler.GetTableEntry(table, i, stage), sampler.is_depth);
+            ResolveSampler(sampler.ApplyPostOp(ssharp, stage), sampler.is_depth);
         sampler_table_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
     }
 }
@@ -1961,16 +1987,10 @@ vk::DescriptorSet Rasterizer::GetSamplerTableSet(const Shader::SamplerResource& 
                                                  const Shader::Info& stage) {
     static constexpr size_t MaxSamplerTableSets = 64;
 
-    auto table = sampler.GetTableSharp(stage);
-    if (!memory->IsValidMapping(table.base_address, table.GetSize())) {
-        table = AmdGpu::Buffer::Null();
-    }
-    const u64 table_bytes = table.GetSize();
+    const auto& snapshot = sampler_table_snapshots[sampler_snapshot_index++];
+    const auto& table = snapshot.data;
     const SamplerTableKey key = {
-        .content_hash =
-            table_bytes != 0
-                ? XXH3_64bits(reinterpret_cast<const void*>(VAddr{table.base_address}), table_bytes)
-                : 0,
+        .content_hash = table.empty() ? 0 : XXH3_64bits(table.data(), table.size()),
         .border_color_base = liverpool->regs.ta_bc_base.Address(),
         .num_entries = sampler.table_size,
         .stride_dw = sampler.table_stride_dw,
@@ -2019,7 +2039,7 @@ vk::DescriptorSet Rasterizer::GetSamplerTableSet(const Shader::SamplerResource& 
     LOG_INFO(Render_Vulkan,
              "Built sampler table set: address={:#x}, entries={}, cached sets={}, binds since "
              "previous build={}",
-             u64{table.base_address}, sampler.table_size, sampler_table_sets.size() + 1,
+             snapshot.address, sampler.table_size, sampler_table_sets.size() + 1,
              sampler_table_binds);
     sampler_table_binds = 0;
     sampler_table_sets.emplace_back(key, set, gc_tick);
