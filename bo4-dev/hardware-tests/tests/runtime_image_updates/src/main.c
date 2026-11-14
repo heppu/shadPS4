@@ -104,6 +104,8 @@ int main(void) {
             st_store_fence();
         }
         if (phase == 5) {
+            if (!st_dmem_map(&alias, arena.size, arena.direct_memory, false))
+                return st_fail("reason=late_alias_mapping");
             for (unsigned t = 0; t < 2; ++t) {
                 float* alias_pixels = (float*)((uint8_t*)alias +
                                                ((uint8_t*)pixels[t] - arena.base));
@@ -187,8 +189,13 @@ int main(void) {
             }
             st_case_expect(&cases[which], "word", i, expected, output[i]);
         }
+        if (phase == 0) {
+            if (sceKernelMunmap(alias, arena.size) != 0)
+                return st_fail("reason=early_alias_unmap");
+            alias = NULL;
+        }
     }
     sceGnmSubmitDone();
     return st_finish_cases(cases, 10,
-                           "cpu_update_one=1 cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 remap_reuse=1 unrelated_remap=1 descriptor_remap=1 guards=1");
+                           "cpu_update_one=1 cpu_update=1 descriptor_swap=1 submit_boundary=1 physical_alias=1 late_alias=1 remap_reuse=1 unrelated_remap=1 descriptor_remap=1 guards=1");
 }
