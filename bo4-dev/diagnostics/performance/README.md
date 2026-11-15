@@ -208,3 +208,26 @@ from 10 to 11 GiB made the unchanged control stall in its intro with only 4.4 Gi
 VRAM in use; its boot profile was about 92% under queueBindSparse. Returning to
 10 GiB restored normal startup. The larger heap is not retained, and no device
 reset or unrelated process shutdown was performed.
+
+
+Final native confirmation used normal 200-health rules and a 10 GiB advertised
+heap. With GPU auto and unrestricted render CPU, unchanged control measured
+22.20 FPS / 23.81 render-CPU ms per frame; retained cache measured 22.08 FPS /
+23.28 ms. All twelve captures show alive gameplay and textured materials.
+There is no reliable overall FPS gain from the cache change.
+
+The existing normal `play-fast` preset (temporary GPU high, render CPU 7)
+measured 31.60 FPS / 19.62 render-CPU ms over 60 seconds. Its six 10-second
+intervals measured 28.6, 31.5, 31.8, 32.2, 33.0 and 32.5 FPS. All six captures
+show alive 200-health gameplay, textured wood/stone/metal, lighting and enemies;
+this is sampled visual validation, not proof that every shader is correct.
+This preset differs from the conservative comparison and is not a new code gain.
+The owned game was stopped and GPU policy restored to auto; unrelated workloads
+were left running. The 28-probe run includes 37 existing WRITE-AFTER-PRESENT
+messages. Intermittent severe sparse-binding stalls and 60 FPS remain unresolved.
+
+`benchmark-launcher.py LABEL` measures the actual normal launcher with the same
+route and native counter. Use a persistent process/session until it completes.
+For this run its outer coordinator ended before report/cleanup; those steps were
+completed manually. Subsequent signal-cleanup handlers are syntax-checked only.
+See `table-storage-comparison.json` for measurements and limitations.

@@ -69,6 +69,57 @@
   "candidate_sha256": "d57f3b5e968d5bffe1ff83965ed3b775737e91ad88e8e39c7478bfe99aa3a22c",
   "compiler_profile": "Fresh O2 native PGO, one BuildImageTableSet counter hash mismatch discarded; no ThinLTO/BOLT/instrumentation.",
   "probes_passed": 28,
-  "status": "Twelve fixed-workload pairs establish 4.2% less submission/wait time; 28 probes pass; final native repeat pending.",
-  "bundle_sha256": "dd5c83398bae74604074adad13fb9a1ff51fec4123818eda13e8f72a2781f7a9"
+  "status": "Retained: 4.2% less fixed-workload submission/wait time across twelve pairs; 28 probes pass. No reliable native FPS gain. Normal existing launch preset measured separately at31.60FPS.",
+  "bundle_sha256": "dd5c83398bae74604074adad13fb9a1ff51fec4123818eda13e8f72a2781f7a9",
+  "heap10-control-repeat": {
+    "fps": 22.19997619202411,
+    "render_cpu_ms_per_frame": 23.81381381381382,
+    "gpu_power_policies": [
+      "auto"
+    ],
+    "render_cpuset": "unrestricted",
+    "advertised_heap_mib": 10240,
+    "reviewed_captures": 6,
+    "alive_in_all_captures": true,
+    "health_setting": 200,
+    "normal_enemy_rules": true,
+    "visual_review": "Textured materials and lighting; no matte-grey regression observed in these samples, not exhaustive shader validation."
+  },
+  "retained-cache": {
+    "fps": 22.083308656333415,
+    "render_cpu_ms_per_frame": 23.275471698113204,
+    "gpu_power_policies": [
+      "auto"
+    ],
+    "render_cpuset": "unrestricted",
+    "advertised_heap_mib": 10240,
+    "reviewed_captures": 6,
+    "alive_in_all_captures": true,
+    "health_setting": 200,
+    "normal_enemy_rules": true,
+    "visual_review": "Textured materials and lighting; no matte-grey regression observed in these samples, not exhaustive shader validation."
+  },
+  "retained-launcher": {
+    "fps": 31.599966524044046,
+    "render_cpu_ms_per_frame": 19.614978902953588,
+    "gpu_power_policies": [
+      "high"
+    ],
+    "render_cpuset": "7",
+    "advertised_heap_mib": 10240,
+    "reviewed_captures": 6,
+    "alive_in_all_captures": true,
+    "health_setting": 200,
+    "normal_enemy_rules": true,
+    "visual_review": "Textured materials and lighting; no matte-grey regression observed in these samples, not exhaustive shader validation."
+  },
+  "limitations": [
+    "Intermittent severe sparse-binding/readback slowdown unresolved",
+    "Scene variation prevents deterministic native FPS comparison",
+    "37 pre-existing WRITE-AFTER-PRESENT messages in28-probe run",
+    "No physical PS4 confirmation",
+    "Existing physical-alias image-write diagnostic fails unchanged control",
+    "60FPS not achieved"
+  ],
+  "launcher_cleanup": "Outer benchmark coordinator ended before report/cleanup. Profile decoded and owned game stopped manually; launcher restored GPU policy to auto. Signal cleanup handlers subsequently added; syntax checked only."
 }
