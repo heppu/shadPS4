@@ -2325,3 +2325,74 @@ active competing workload, and aggregate activity returned to idle after the
 owned emulator stopped. This does not yet identify the cause or prove the small
 interval change responsible. Unchanged control reproduction with a bounded
 idle/damage/downed route is in progress. No 60-FPS claim is made.
+
+
+## Control reproduction and image-region experiment (2026-11-15)
+
+The unchanged refreshed-profile control completed the idle/damage/downed route
+without the interval experiment's severe slowdown. Its 28.90-FPS average includes
+downed and revived states and a different character/corridor, so it neither
+proves a cause nor supplies a healthy performance comparison. All six captures
+were reviewed. A late gameplay profile still centers on resource binding.
+
+Returning the cached image-region list by const reference saves two read-only
+callers a copy; FindImage still explicitly copies before nested lookups mutate
+the cache. The candidate passed all 27 probes. Its first 18.12-FPS run contains
+a podium collision and downed states. The healthy repeat measured 23.40 FPS
+and 22.98 render-CPU ms/frame, versus refreshed control 22.68 FPS and 22.94 ms.
+All six repeat captures show textured, alive 200-health gameplay. With unchanged
+CPU time, no reliable gain is established; the patch is removed and preserved
+only as a diagnostic.
+
+The corrected bounded-spin shader probe is included in the rebuilt 35-ELF
+bundle, SHA256 45e6ce9d8bd2f65d11489f49136241cfb7e47c9eb08e71eb9a78887f4f0cb78e.
+This supersedes the earlier bundle containing the 1-ms polling sleep.
+
+
+## Image-table lookup and executable-layout experiments (2026-11-15)
+
+LLVM BOLT 23.1.5 was evaluated on a relocation-enabled unchanged control, using
+a native hardware-branch profile. Strict conversion required removing optional
+SFrame metadata from a separate input copy; text bytes were checked unchanged
+and standard EH unwinding retained. All 27probes passed, but twelve alternating
+shader workloads averaged 34.351ms control versus 34.327ms candidate. Native
+19.68 versus 19.95 FPS runs both contain downed scenes and establish no benefit.
+The BOLT executable is preserved as a rejected experiment, not installed by default.
+
+A pointer cache using the broad view generation also failed to improve gameplay.
+Its healthy repeat measured 20.73 FPS / 23.79 CPU ms per frame. A corrected debugger
+sample at 16 actual function entries found only 3 of 5,522 static entries with matching
+generations; the initial inlined-breakpoint attempt had 63 errors and was discarded.
+
+The refined cache separates storage lifetime from view changes. Existing-value
+replacement preserves its address, whereas every insertion or erasure invalidates
+cached pointers. Existing UID, update, alias and layout validation remains. The
+source implementation of Abseil's insert_or_assign was checked to confirm that
+existing-key replacement cannot rehash. A separate 16-call sample found 4,941 of 4,941
+static-entry generation matches; this is a validity sample, not an executed-path
+hit-rate measurement. All 28 original rendering/coherence probes pass.
+
+The new image_table_reuse homebrew samples 4,096 table entries backed by 64 textures
+for 132 rounds, checking every output and guard word. It excludes 4 warmup rounds
+and CPU initialization/validation from its submission-to-completion timer. Six
+alternating pairs average 9423.33 us control versus 9134.50 us candidate; six reversed
+pairs average 9563.33 versus 9056.17 us. Combined time is 4.2% lower. This does not
+establish an overall gameplay FPS gain. The normal build remains O2/native/PGO,
+with the changed BuildImageTableSet profile counters discarded; no BOLT, ThinLTO
+or training instrumentation is enabled.
+
+One candidate native run reproduced the severe slowdown seen during the earlier
+interval experiment, averaging 8 FPS, with no memory-guard breach. A later profile
+was about 48% under sparse-binding submission and image readbacks. The unchanged
+control also slowed in its intro when advertising 11 GiB, despite only 4.4 GiB actual
+VRAM usage, with about 92% of sampled render cycles under queueBindSparse. The
+driver hotspot wraps the GEM_VA ioctl; its root cause is not established.
+Returning to 10 GiB restored normal startup and a healthy 22.20 FPS minute. All six
+control captures remain alive with two revives and textured materials. No device
+reset, kernel setting change or unrelated process shutdown was performed. The
+11 GiB experiment is discarded. Final candidate gameplay confirmation is pending.
+
+The original homebrew bundle now contains 36 ELFs; SHA256
+dd5c83398bae74604074adad13fb9a1ff51fec4123818eda13e8f72a2781f7a9.
+Hindsight ingestion failed with its server's PostgreSQL shared-memory error;
+these repository notes preserve the findings. 60 FPS remains unfinished.

@@ -1,5 +1,8 @@
 function(configure_profile_build)
     target_compile_options(shadps4 PRIVATE -march=native)
+    if(SHAD_BOLT_RELOCS)
+        target_link_options(shadps4 PRIVATE -Wl,--emit-relocs)
+    endif()
     if(SHAD_PGO_STAGE STREQUAL "GENERATE")
         target_compile_options(shadps4 PRIVATE
             -fprofile-generate=/out/performance/pgo-raw)

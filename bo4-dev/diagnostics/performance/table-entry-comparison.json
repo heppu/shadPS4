@@ -1,0 +1,25 @@
+{
+  "table-entry": {
+    "fps": 19.383312170310997,
+    "render_cpu_ms_per_frame": 25.74376612209802,
+    "all_six_captures_reviewed": true
+  },
+  "table-entry-repeat": {
+    "fps": 20.733311563351336,
+    "render_cpu_ms_per_frame": 23.786173633440516,
+    "all_six_captures_reviewed": true
+  },
+  "visuals": {
+    "table-entry": "Downed at20/30/50, revived40/60; no healthy comparison.",
+    "table-entry-repeat": "Alive at all six captures; damage at20, two revives throughout; textured scene."
+  },
+  "decision": "Coarse view-generation pointer cache not retained as written: repeat20.73 FPS /23.79CPUms does not improve over healthy fresh-profile control22.68FPS/22.94ms.",
+  "diagnostic": {
+    "calls": 16,
+    "entries": 5634,
+    "static_entries": 5522,
+    "static_cached_generation_matches": 3
+  },
+  "diagnostic_limitation": "16 real function entries sampled after native timing. Counts describe static-entry generation matches, not on-path cache hit rate. Prior inlined breakpoint attempt had63errors and was discarded.",
+  "refinement": "Separate storage-generation experiment in progress; existing value replacement cannot move storage, insertion/erasure invalidate pointers. Existing image lifetime and version checks remain."
+}

@@ -1,0 +1,74 @@
+{
+  "fixed_workloads": {
+    "fixed": {
+      "control": {
+        "us": [
+          9082,
+          9221,
+          9640,
+          9204,
+          9493,
+          9900
+        ],
+        "mean_us": 9423.333333333334,
+        "median_us": 9357.0
+      },
+      "candidate": {
+        "us": [
+          9450,
+          9113,
+          8702,
+          9656,
+          8860,
+          9026
+        ],
+        "mean_us": 9134.5,
+        "median_us": 9069.5
+      }
+    },
+    "confirm": {
+      "control": {
+        "us": [
+          10042,
+          9421,
+          9531,
+          9449,
+          9440,
+          9497
+        ],
+        "mean_us": 9563.333333333334,
+        "median_us": 9473.0
+      },
+      "candidate": {
+        "us": [
+          9453,
+          8840,
+          8932,
+          8878,
+          9231,
+          9003
+        ],
+        "mean_us": 9056.166666666666,
+        "median_us": 8967.5
+      }
+    }
+  },
+  "diagnostic": {
+    "calls": 16,
+    "entries": 5277,
+    "static_entries": 4941,
+    "static_cached_generation_matches": 4941
+  },
+  "diagnostic_limitation": "16 real function entries sampled after timing during the stalled gameplay session; static entry generation matches are not a counted executed-path hit rate.",
+  "native": {
+    "fps": 7.99999170587482,
+    "render_cpu_ms_per_frame": 30.8125,
+    "invalid_performance_comparison": true,
+    "reason": "Severe sparse-binding/readback slowdown from about30seconds; separate root cause unresolved."
+  },
+  "candidate_sha256": "d57f3b5e968d5bffe1ff83965ed3b775737e91ad88e8e39c7478bfe99aa3a22c",
+  "compiler_profile": "Fresh O2 native PGO, one BuildImageTableSet counter hash mismatch discarded; no ThinLTO/BOLT/instrumentation.",
+  "probes_passed": 28,
+  "status": "Twelve fixed-workload pairs establish 4.2% less submission/wait time; 28 probes pass; final native repeat pending.",
+  "bundle_sha256": "dd5c83398bae74604074adad13fb9a1ff51fec4123818eda13e8f72a2781f7a9"
+}

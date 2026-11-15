@@ -1,0 +1,54 @@
+{
+  "bolt-control": {
+    "fps": 19.683311998908678,
+    "render_cpu_ms_per_frame": 25.867908552074518,
+    "healthy_comparison": false,
+    "captures_reviewed": 6
+  },
+  "bolt-candidate": {
+    "fps": 19.94997412388528,
+    "render_cpu_ms_per_frame": 27.259816207184624,
+    "healthy_comparison": false,
+    "captures_reviewed": 6
+  },
+  "fixed_workload": {
+    "control": {
+      "measured_us": [
+        35043,
+        34123,
+        33766,
+        34109,
+        34726,
+        34339
+      ],
+      "mean_us": 34351
+    },
+    "candidate": {
+      "measured_us": [
+        34034,
+        35883,
+        34204,
+        34181,
+        34104,
+        33557
+      ],
+      "mean_us": 34327.166666666664
+    }
+  },
+  "decision": "Not retained: no convincing native or fixed-workload improvement. Native routes differ and both include downed states.",
+  "probes": {
+    "pass": 27,
+    "SYNC-HAZARD-WRITE-AFTER-PRESENT": 33
+  },
+  "profile_limitations": [
+    "20-second 99 Hz branch profile; optimizer requests greater sample density",
+    "303 unanalyzed relocations; two profiled functions not optimized",
+    "Optional SFrame removed in separate input; .text identity and .eh_frame retained; strict aggregation succeeded"
+  ],
+  "build": "Clang O2 native PGO + LLVM BOLT 23.1.5 ext-tsp/hfsort; no function splitting; updated debug sections",
+  "source_core": "0e8b7cc2d4b42483634aa7eafbced7e5d3ce341f",
+  "build_source_commit": "3e4ba6aa",
+  "control_binary_sha256": "092ad36003e946ae1cdf1a0c4a692126fd5bf23bf240fa14d7262af4364505c5",
+  "candidate_binary_sha256": "ef80bb8b19f5a84a0d7922d3d6743fb89c5d13bfbdc6389914494cbe96887d71",
+  "controls": "GPU auto, unrestricted CPU, default 200 health"
+}

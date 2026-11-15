@@ -1,0 +1,8 @@
+{
+  "purpose": "Unchanged-control damage/downed reproduction; not a healthy FPS comparison",
+  "fps": 28.899968584278152,
+  "render_cpu_ms_per_frame": 18.471741637831602,
+  "severe_collapse_reproduced": false,
+  "captures": "All six reviewed. Downed at 30 and 50 seconds, revived at 40 and 60; final after-action screen renders.",
+  "limits": "Different character and corridor scene than the rejected interval run; does not establish its cause."
+}

@@ -143,3 +143,68 @@ points to readbacks, sparse binds and backing release. The cause is not proven
 to be the interval change. `sequence-idle-on-gameplay.py` supplies a bounded
 control reproduction workload for damage/downed states. `gpu-client-load.py`
 reads two seconds of per-client AMD engine counters; it never changes workloads.
+
+## Post-link layout experiment (2026-11-15)
+
+`Dockerfile.bolt` builds an isolated LLVM BOLT tool image; the measured version
+was 23.1.5. This is an optional rejected experiment, not the default executable.
+Enable `SHAD_BOLT_RELOCS=ON` in the existing PGO CMake build to retain relocations.
+`start-benchmark.sh` accepts an optional third argument for a profiler script;
+`perf-bolt-on-gameplay.sh` captures 20 seconds of 99-Hz hardware branch samples.
+Save the exact executable before profiling it.
+
+Run `prepare-bolt-input.sh ORIGINAL PREPARED` in the tool image, then
+`optimize-bolt.sh LABEL PREPARED OUTPUT`, with paths visible in that container.
+The preparer removes optional `.sframe` metadata unsupported by this BOLT build,
+compares the `.text` bytes, and checks that standard `.eh_frame` unwinding remains.
+It preserves the input. The optimizer uses strict profile aggregation, ext-tsp
+block ordering, hfsort function ordering, and updated debug sections. It does
+not enable function splitting. Do not suppress unknown-relocation errors.
+
+The input had three unclaimed relocations in SFrame. With that optional section
+removed, strict aggregation and optimization completed. The sample is sparse:
+486 functions received usable profiles, two could not be optimized, and 303
+relocations were not analyzed. The tool requests denser profiling. All 27 probes
+pass, including existing presentation warnings. Six alternating fixed shader
+workloads measured 34.351 ms control versus 34.327 ms BOLT: essentially unchanged.
+Native runs measured 19.68 versus 19.95 FPS, but both contain downed states and
+different scenes, with CPU time increasing from 25.87 to 27.26 ms/frame. No gain
+is established, so BOLT is not retained. See `bolt-comparison.json`.
+
+References: [LLVM BOLT guide](https://github.com/llvm/llvm-project/blob/main/bolt/docs/GettingStarted.md),
+[profile documentation](https://github.com/llvm/llvm-project/blob/main/bolt/docs/profiles.md).
+
+## Image-table entry lookup (2026-11-15)
+
+`table-entry.patch` preserves the rejected coarse-generation prototype. A native
+repeat stayed alive but averaged 20.73 FPS / 23.79 render-CPU ms, with no gain over the
+22.68 FPS / 22.94 ms refreshed-profile control. A post-timing debugger sample at 16
+actual function entries found only 3 of 5,522 static entries with matching cached
+generations. The initial attempt stopped in inline functions and had 63 errors;
+its counts are invalid. `table-entry-cache-counts.gdb` uses the exact x86-64
+function entry and ABI registers, after native timing only.
+
+The refined candidate tracks storage changes separately. New keys can rehash
+the map; erasures retire references; both invalidate cached pointers. Replacing
+an existing value leaves its address stable. The bundled Abseil implementation
+was checked for that property. Existing image UID/version, content, alias and
+layout checks remain. A separate 16-entry diagnostic found 4,941 of 4,941 static
+entries with matching generations. These are validity observations at function
+entry, not a measured executed-path hit rate.
+
+The original `image_table_reuse` homebrew checks repeated 4,096-entry sampling.
+Six alternating pairs measured 9423.33 us control versus 9134.50 us candidate; six
+reversed-order pairs measured 9563.33 versus 9056.17 us. Combined submission/wait
+time is about 4.2% lower. Initialization and output checking are excluded from
+that timer; it still includes GPU/queue costs and does not imply a gameplay FPS
+speedup. `compare-image-table-probe.sh` and `compare-image-table-confirm.sh`
+reproduce these runs. `retained-cache-regressions.sh` includes all 28 probes.
+
+A native candidate run also reproduced a severe slowdown to below 1 FPS, while
+all memory guards remained within limits. A later profile attributed about 48%
+of sampled render cycles to scheduler finishes/sparse binding and image
+readbacks. This is a separate unresolved issue. Increasing the advertised heap
+from 10 to 11 GiB made the unchanged control stall in its intro with only 4.4 GiB
+VRAM in use; its boot profile was about 92% under queueBindSparse. Returning to
+10 GiB restored normal startup. The larger heap is not retained, and no device
+reset or unrelated process shutdown was performed.
