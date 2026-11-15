@@ -285,6 +285,8 @@ private:
         bool is_dynamic{true};
         VideoCore::ImageId image_id{};
         u64 update_version{};
+        TableImage* resolved{};
+        u64 resolved_generation{};
     };
     struct ImageTable {
         VAddr address{};
@@ -335,6 +337,7 @@ private:
     absl::flat_hash_map<u64, TableKey> table_keys;
     u64 table_key_generation{};
     u64 table_view_generation{};
+    u64 table_storage_generation{};
     absl::flat_hash_map<u64, vk::ImageView> image_table_gpu_views;
     std::vector<std::pair<VAddr, VAddr>> table_remapped_ranges;
     std::array<u32, 128 * AmdGpu::NUM_NUMBER_FMTS> last_image_tables{};

@@ -1375,7 +1375,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
                                          vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
     }
     ++table_view_generation;
-    table_images.insert_or_assign(
+    table_storage_generation += table_images.insert_or_assign(
         key,
         TableImage{
             .image_id = image_id,
@@ -1389,7 +1389,7 @@ vk::ImageView Rasterizer::ResolveGpuTableImage(const AmdGpu::Image& tsharp, u64 
             .used_tick = TableEpoch(),
             .synced_update_version = update_version,
             .resolved_address = tsharp.Address(),
-        });
+        }).second;
     return view;
 }
 
@@ -1484,6 +1484,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
             return entry.view;
         }
         table_images.erase(it);
+        ++table_storage_generation;
         ++table_view_generation;
     }
     if (!image_desc) {
@@ -1546,6 +1547,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
                     content_changed && other != table_images.end() &&
                     other->second.resolved_address == entry.resolved_address) {
                     table_images.erase(other);
+                    ++table_storage_generation;
                     ++table_view_generation;
                     ++table_steals;
                 }
@@ -1558,7 +1560,7 @@ vk::ImageView Rasterizer::ResolveTableImage(const AmdGpu::Image& tsharp, u64& ke
         }
     }
     ++table_view_generation;
-    table_images.insert_or_assign(key, entry);
+    table_storage_generation += table_images.insert_or_assign(key, entry).second;
     return entry.view;
 }
 
@@ -1676,9 +1678,16 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 if (!refresh_all && !candidate.is_dynamic &&
                     candidate.update_version ==
                         texture_cache.ImageUpdateVersion(candidate.image_id)) {
-                    const auto cached = table_images.find(candidate.key);
-                    if (cached != table_images.end() && cached->second.GetImage(texture_cache)) {
-                        auto& resolved = cached->second;
+                    // Storage changes can invalidate pointers even when views stay unchanged.
+                    if (!candidate.resolved ||
+                        candidate.resolved_generation != table_storage_generation) {
+                        const auto cached = table_images.find(candidate.key);
+                        candidate.resolved =
+                            cached != table_images.end() ? &cached->second : nullptr;
+                        candidate.resolved_generation = table_storage_generation;
+                    }
+                    if (candidate.resolved && candidate.resolved->GetImage(texture_cache)) {
+                        auto& resolved = *candidate.resolved;
                         if (resolved.used_tick != epoch) {
                             resolved.used_tick = epoch;
                             texture_cache.KeepAlive(resolved.image_id);
@@ -1722,6 +1731,8 @@ void Rasterizer::BuildImageTableSet(u32 table_index, const Shader::ImageResource
                 }
                 if (view) {
                     auto& resolved = table_images.at(key);
+                    candidate.resolved = &resolved;
+                    candidate.resolved_generation = table_storage_generation;
                     set_entry(i, key, view, resolved.layout);
                     const auto* image = resolved.GetImage(texture_cache);
                     candidate.image_id = resolved.image_id;
@@ -1994,6 +2005,7 @@ vk::DescriptorSet Rasterizer::GetImageTableSet(const Shader::ImageResource& imag
                 return entry.second.used_tick + EvictAge < gc_tick;
             });
             if (removed != 0) {
+                ++table_storage_generation;
                 ++table_view_generation;
             }
         }
