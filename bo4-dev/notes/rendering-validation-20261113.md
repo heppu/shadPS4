@@ -2248,3 +2248,80 @@ materials and geometry; no matte-grey workaround is introduced. They do not
 prove every shader or scene correct. The original probe bundle now contains 34
 ELFs, including the three new synchronization probes and the expanded image
 probe; SHA256 0a5eaf23c4990adf71294fe5569bf5d9a70855a5e0bc2b257f2441d719704de6.
+
+
+## Shader lookup follow-up (2026-11-15)
+
+Fresh profiling on retained source 0e8b7cc2 finds resource binding at about
+50.76% inclusive sampled render-thread cycles, image-table building 16.87%,
+buffer acquisition 15.49%. These overlap and are not additive. A last-successful
+shader variant shortcut was built and passed all 26 existing probes plus the
+new original shader_variant_reuse probe. It refreshes resources and checks the
+existing compatibility predicate before reuse. However, three alternating
+identical 24-variant/144-round workloads measured 135201 us control versus
+135600.7 us candidate, with no measurable gain. It is removed from core and
+saved as a rejected diagnostic patch.
+
+Native default-health control binding-control averaged 21.63331 FPS and
+24.17565 render-CPU ms/frame; all six timed captures were alive and textured.
+Variant-cache averaged 20.41664 FPS and 25.06122 ms/frame, but a revive and a
+podium collision invalidate a matched gameplay speed comparison. These runs
+use GPU auto and unrestricted render-thread CPU placement, unlike the earlier
+play-fast high-policy/CPU7 runs. No shader or overall FPS speedup is claimed.
+The GDB variant-count attempt produced optimized-out variables; no hit-rate
+conclusion can be drawn from it. The passing homebrew explicitly creates 24
+compute pipeline variants (23 permutation compiles in its cold log).
+
+The next experiment retrains Clang's execution profile against the current
+retained core. Old profile counters were being discarded for changed hot
+texture functions. Original profile and training artifacts are archived under
+live out/performance/pgo-before-refresh-20261115; the playable control executable
+is shadps4-before-binding-pass. Training-build results are not native FPS data.
+
+
+The refreshed instrumented build completed after a foreground command returned
+143; a detached retry verified the completed build. No compiler error or memory
+watchdog breach was identified. The profile checkpoint returned zero after
+60 seconds of the default running route. Its screenshot shows a textured arena,
+alive at 200 health with one revive left, so this training includes a revive.
+LLVM merged 27022 functions / 206983 blocks into pgo-refreshed.profdata. A normal
+O2 profile-use rebuild follows; no training FPS claim is made. The original
+probe bundle now has 35 ELFs; SHA256
+ebe6fd09cff8144ec1a7044a278bf405f3ba859dd939011f6d2e1d74e66e85fd.
+
+
+## Compiler profile and range-tracking checkpoint (2026-11-15)
+
+The normal O2 refreshed-profile build completed with no profile-counter mismatch
+warnings and no training symbols. All 27 original probes passed. It measured
+22.68331 FPS / 22.93902 render-CPU ms per frame, compared with initial control
+21.63331 / 24.17565. Repeating the unchanged old-profile control measured
+23.56664 / 22.41867. Thus no reliable profile speedup is established. All six
+captures in each of these three runs remain alive with two revives; materials,
+geometry, weapon and lighting are textured. The scene/character variation is
+still material. These are GPU-auto/unrestricted-CPU measurements.
+
+Correction to the shader microbenchmark above: the shared completion helper
+sleeps 1 ms, masking sub-millisecond changes in the approximately 135 ms results.
+The focused probe now polls with bounded pause instructions, preserving the
+completion load fence and all output/guard checks. Three alternating corrected
+pairs measure 35293 us control versus 35317 us candidate. No benefit is found;
+the last-module patch remains removed. The original timings are retained with
+this limitation in variant-comparison.json.
+
+A separate generic IntervalList append shortcut was built and passed all 27
+probes. Three preliminary pairs averaged 34361 us control versus 33614 us
+candidate; six confirmation pairs reversed that to 34358 versus 34926 us.
+Native interval-append starts at 22.1 FPS, then falls below 1 FPS with near-100%
+GPU activity. Its full-minute average is 5.23333 FPS. All six timed captures
+were reviewed: alive at 10/20 seconds, downed at 30/40/50, revived by 60. It is
+not a healthy comparison or an accepted optimization. The patch is removed.
+
+A separate later stall profile, while the screen was black/loading, puts 97.22%
+of sampled render cycles under buffer readback, including scheduler finishes,
+sparse buffer binds, and backing-memory release. This differs from the healthy
+binding-heavy profile. Other visible GPU-client counters did not identify an
+active competing workload, and aggregate activity returned to idle after the
+owned emulator stopped. This does not yet identify the cause or prove the small
+interval change responsible. Unchanged control reproduction with a bounded
+idle/damage/downed route is in progress. No 60-FPS claim is made.

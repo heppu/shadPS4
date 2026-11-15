@@ -1,0 +1,20 @@
+diff --git a/src/common/interval_set.h b/src/common/interval_set.h
+index 8209136c..6c4e1641 100644
+--- a/src/common/interval_set.h
++++ b/src/common/interval_set.h
+@@ -64,6 +64,15 @@ public:
+             return;
+         }
+ 
++        if (intervals.empty() || intervals.back().end < value.start) {
++            intervals.push_back(value);
++            return;
++        }
++        if (auto& last = intervals.back(); last.end == value.start && last.CanMergeWith(value)) {
++            last.end = value.end;
++            return;
++        }
++
+         IV out[3];
+         std::size_t m = 0;
+ 

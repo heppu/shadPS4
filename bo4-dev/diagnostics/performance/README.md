@@ -101,3 +101,45 @@ play and establishes no gain. Keep it out of the normal playable build.
 Run frame-counter tools as root **inside the owned benchmark container**;
 otherwise `/proc/<pid>/mem` may reject access. Validate that access before
 launching the match. Do not attach a debugger during native timing.
+
+
+## Shader lookup and refreshed compiler profile (2026-11-15)
+
+`variant-cache.patch` is a rejected last-successful shader variant shortcut,
+not applied to the playable core. It retains the compatibility check, but three
+corrected alternating homebrew workloads measured 35.293 ms control versus
+35.317 ms candidate, establishing no gain. The original 135 ms samples used a
+1 ms completion sleep and masked small savings; the probe now uses bounded
+pause polling and retains the required load fence. The 21.63-FPS native control stays
+alive; the 20.42-FPS candidate contains a revive and different scene. Both use
+automatic GPU policy and unrestricted CPU scheduling; keep them separate from
+play-fast runs with high policy and render-thread affinity. Raw data are in
+`variant-comparison.json`. All 27 rendering/coherence probes pass.
+
+`variant-lookup.gdb` is an unsuccessful inspection attempt: the optimized build
+eliminates the requested local variables. Its output cannot establish variant
+counts or hit rates. The focused original `shader_variant_reuse` ELF does compile
+24 variants and verifies switching, repetition, output values and guard words.
+
+`build-background.sh LABEL [JOBS]` starts an owned detached build container and
+writes `LABEL-build.log` with a `BUILD_EXIT` marker. Wait for that marker before
+using the executable or changing build inputs. It avoids tying a long build to
+the command session lifetime. `checkpoint-on-gameplay.py LABEL` waits for the
+HUD marker, collects 60 seconds, saves a screenshot, requests the existing LLVM
+profile writer, and checks its return status. Use only with a GENERATE build;
+training FPS is not a performance result. Preserve the old profile and executable
+before replacing the canonical profile. The refreshed USE build is checked with
+`pgo-refreshed-regressions.sh` (27 original probes).
+
+`pgo-comparison.json` records the refreshed compiler profile: 22.68 FPS versus
+21.63 FPS initial control, but 23.57 FPS on the control repeat. This establishes
+no reliable gain. All 27 probes pass; the normal USE build is noninstrumented.
+
+`interval-append.patch` is another rejected experiment, not applied to core.
+It passes 27 probes, but six alternating bounded-spin workloads average
+34.358 ms control versus 34.926 ms candidate. Its native run slows sharply,
+averages 5.23 FPS, and includes downed gameplay. A later loading-screen profile
+points to readbacks, sparse binds and backing release. The cause is not proven
+to be the interval change. `sequence-idle-on-gameplay.py` supplies a bounded
+control reproduction workload for damage/downed states. `gpu-client-load.py`
+reads two seconds of per-client AMD engine counters; it never changes workloads.

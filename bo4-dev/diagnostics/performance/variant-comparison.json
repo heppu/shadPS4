@@ -1,0 +1,42 @@
+{
+  "control": {
+    "micro_us": [
+      135338,
+      135478,
+      134787
+    ],
+    "mean_us": 135201,
+    "spin_micro_us": [
+      35294,
+      35239,
+      35346
+    ],
+    "spin_mean_us": 35293.0
+  },
+  "candidate": {
+    "micro_us": [
+      135193,
+      135252,
+      136357
+    ],
+    "mean_us": 135600.66666666666,
+    "spin_micro_us": [
+      34610,
+      36122,
+      35219
+    ],
+    "spin_mean_us": 35317.0
+  },
+  "binding-control": {
+    "fps": 21.633311549295787,
+    "render_cpu_ms_per_frame": 24.17565485362096
+  },
+  "variant-cache": {
+    "fps": 20.416644473102046,
+    "render_cpu_ms_per_frame": 25.061224489795922
+  },
+  "decision": "Last-module shortcut remains removed: corrected 24-variant bounded-spin workload measured no gain; native candidate includes revive and different scene.",
+  "probe_passes": 27,
+  "comparison_limits": "Automatic GPU policy, unrestricted CPU scheduling; control alive all six captures; candidate revive before 30 seconds.",
+  "original_micro_limitation": "The original probe sleeps 1 ms per completion poll; its approximately 135 ms totals mask small savings. Corrected bounded-spin timings supersede those performance results."
+}
